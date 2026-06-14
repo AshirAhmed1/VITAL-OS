@@ -63,6 +63,21 @@ import {
   mergeParsedIntoPatientData,
   parseAdmissionCommand,
 } from "@/lib/admission-parser";
+import {
+  extractModificationPatientName,
+  formatAmbiguousPatientPrompt,
+  resolvePatientForModification,
+} from "@/lib/patient-identification";
+import {
+  applyParsedCommandToPatient,
+  parseDischargeReason,
+  type UndoSnapshot,
+} from "@/lib/patient-voice-handler";
+import {
+  parsePatientCommand,
+  PERMISSION_DENIED_MESSAGE,
+  type PatientCommandIntent,
+} from "@/lib/patient-command-parser";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Types
@@ -389,6 +404,31 @@ async function persistPatientProblems(
     body: JSON.stringify({ problems: payload }),
   });
   return res.ok;
+}
+
+async function persistPatientPatch(
+  patientId: string,
+  patch: Record<string, unknown>,
+  role: VitalRole
+): Promise<boolean> {
+  const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...roleRequestHeaders(role),
+    },
+    body: JSON.stringify(patch),
+  });
+  if (res.ok) return true;
+  if (process.env.NODE_ENV === "development") {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    console.warn("Patient patch failed:", body.error ?? res.status);
+  }
+  return false;
+}
+
+function requiresDoctorRole(intent: PatientCommandIntent): boolean {
+  return intent !== "unknown" && intent !== "patientSummary";
 }
 
 function detectOrderMedication(command: string): string | null {
@@ -2690,6 +2730,17 @@ export default function VitalOsClient() {
   const [orderNotice, setOrderNotice] = React.useState<string | null>(null);
   const [openPatientTabIds, setOpenPatientTabIds] = React.useState<string[]>([]);
   const [dischargeConfirmId, setDischargeConfirmId] = React.useState<string | null>(null);
+  const [dischargeWorkflow, setDischargeWorkflow] = React.useState<{
+    patientId: string;
+    patientName: string;
+    step: "confirm" | "reason";
+  } | null>(null);
+  const dischargeWorkflowRef = React.useRef(dischargeWorkflow);
+
+  React.useEffect(() => {
+    dischargeWorkflowRef.current = dischargeWorkflow;
+  }, [dischargeWorkflow]);
+  const lastUndoRef = React.useRef<UndoSnapshot | null>(null);
   const [pendingMedicationOrder, setPendingMedicationOrder] =
     React.useState<PendingMedicationDraft | null>(null);
   const [clinicalReasoning, setClinicalReasoning] =
@@ -2717,6 +2768,11 @@ export default function VitalOsClient() {
   /** Live voice session: mic stays open; pause → auto-send; you can interrupt TTS. */
   const [voiceSessionLive, setVoiceSessionLive] = React.useState(false);
   const [micMuted, setMicMuted] = React.useState(false);
+  const micMutedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    micMutedRef.current = micMuted;
+  }, [micMuted]);
 
   const [voiceEnabled, setVoiceEnabled] = React.useState(true);
   const [supportsSpeech, setSupportsSpeech] = React.useState(true);
@@ -2818,6 +2874,7 @@ export default function VitalOsClient() {
     if (systemState !== "speaking") return;
     const ensureMic = () => {
       if (!voiceSessionActiveRef.current || !listeningIntentRef.current) return;
+      if (micMutedRef.current) return;
       if (typeof window === "undefined" || !window.speechSynthesis?.speaking) {
         return;
       }
@@ -3043,11 +3100,13 @@ export default function VitalOsClient() {
 
   const armSilenceSubmit = React.useCallback(() => {
     if (!voiceSessionActiveRef.current) return;
+    if (micMutedRef.current) return;
     if (systemStateRef.current === "processing") return;
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     silenceTimerRef.current = globalThis.setTimeout(() => {
       silenceTimerRef.current = null;
       if (!voiceSessionActiveRef.current) return;
+      if (micMutedRef.current) return;
       if (systemStateRef.current === "processing") return;
       const text = (finalRef.current + " " + interimRef.current).trim();
       if (!text) return;
@@ -3063,8 +3122,10 @@ export default function VitalOsClient() {
 
   const resumeVoiceCapture = React.useCallback(() => {
     if (!voiceSessionActiveRef.current) return;
+    if (micMutedRef.current) return;
     globalThis.setTimeout(() => {
       if (!voiceSessionActiveRef.current) return;
+      if (micMutedRef.current) return;
       startListeningContinueRef.current({ hard: false });
     }, 400);
   }, []);
@@ -3119,6 +3180,8 @@ export default function VitalOsClient() {
     };
 
     rec.onresult = (ev) => {
+      if (micMutedRef.current) return;
+
       const { interim, finalDelta } = readRecognitionTranscripts(ev);
 
       const heard = Boolean(finalDelta.trim() || interim.trim());
@@ -3187,7 +3250,11 @@ export default function VitalOsClient() {
         msg =
           "Microphone permission was denied. Allow mic access in your browser to use VITAL OS.";
       } else if (code === "no-speech") {
-        if (listeningIntentRef.current && voiceSessionActiveRef.current) {
+        if (
+          listeningIntentRef.current &&
+          voiceSessionActiveRef.current &&
+          !micMutedRef.current
+        ) {
           resumeVoiceCaptureRef.current();
         }
         return;
@@ -3252,9 +3319,9 @@ export default function VitalOsClient() {
       }
 
       /* Session ended unexpectedly while still listening — restart after a tick (Chromium quirk). */
-      if (listeningIntentRef.current) {
+      if (listeningIntentRef.current && !micMutedRef.current) {
         globalThis.setTimeout(() => {
-          if (!listeningIntentRef.current) return;
+          if (!listeningIntentRef.current || micMutedRef.current) return;
           resumeVoiceCaptureRef.current();
         }, 200);
         return;
@@ -3286,6 +3353,7 @@ export default function VitalOsClient() {
         ) {
           return;
         }
+        if (micMutedRef.current) return;
         await new Promise<void>((r) => setTimeout(r, 60));
         let rec = recognitionRef.current;
         if (!rec) {
@@ -3623,12 +3691,25 @@ export default function VitalOsClient() {
 
         case "discharge_confirm":
           if (!permissions.canDischargePatient) {
-            pushGeminiResponse(ACCESS_RESTRICTED_MESSAGE);
+            pushGeminiResponse(PERMISSION_DENIED_MESSAGE);
             return true;
           }
+          setDischargeWorkflow({
+            patientId: action.payload.patientId,
+            patientName:
+              patients.find((p) => p.id === action.payload.patientId)?.name ??
+              "patient",
+            step: "confirm",
+          });
           setDischargeConfirmId(action.payload.patientId);
           setPendingMedicationOrder(null);
-          pushGeminiResponse(assistantResponse);
+          pushGeminiResponse(
+            assistantResponse ||
+              `Are you sure you want to discharge ${
+                patients.find((p) => p.id === action.payload.patientId)?.name ??
+                "this patient"
+              }?`
+          );
           return true;
 
         case "update_problem_status": {
@@ -3755,7 +3836,12 @@ export default function VitalOsClient() {
       }
 
       if (!permissions.canDischargePatient && isDischargeIntent(lower)) {
-        pushLocalAssistantResponse(command, ACCESS_RESTRICTED_MESSAGE);
+        pushLocalAssistantResponse(command, PERMISSION_DENIED_MESSAGE);
+        return true;
+      }
+
+      if (role !== "doctor" && matchesStatusIntent(command)) {
+        pushLocalAssistantResponse(command, PERMISSION_DENIED_MESSAGE);
         return true;
       }
 
@@ -3763,6 +3849,170 @@ export default function VitalOsClient() {
         pushLocalAssistantResponse(command, ACCESS_RESTRICTED_MESSAGE);
         return true;
       }
+
+      const parsedVoice = parsePatientCommand(command);
+      if (parsedVoice.intent !== "unknown") {
+        if (requiresDoctorRole(parsedVoice.intent) && role !== "doctor") {
+          pushLocalAssistantResponse(command, PERMISSION_DENIED_MESSAGE);
+          return true;
+        }
+
+        if (parsedVoice.intent === "undo") {
+          const snap = lastUndoRef.current;
+          if (!snap) {
+            pushLocalAssistantResponse(command, "There is no recent change to undo.");
+            return true;
+          }
+          const ok = await persistPatientPatch(snap.patientId, snap.patch, apiRole);
+          lastUndoRef.current = null;
+          if (!ok) {
+            pushLocalAssistantResponse(command, "Undo failed. Try again.");
+            return true;
+          }
+          await refreshPatients();
+          pushLocalAssistantResponse(
+            command,
+            `Undid the last ${snap.description} change.`
+          );
+          return true;
+        }
+
+        if (parsedVoice.intent === "dischargePatient") {
+          const resolved = resolvePatientForModification(patients, {
+            transcript: command,
+            patientHint: parsedVoice.patientHint,
+            activePatientId: selectedPatientId,
+          });
+          if (resolved.status === "ambiguous") {
+            pushLocalAssistantResponse(
+              command,
+              resolved.message || formatAmbiguousPatientPrompt(resolved.patients)
+            );
+            return true;
+          }
+          if (resolved.status === "not_found") {
+            pushLocalAssistantResponse(
+              command,
+              resolved.message ??
+                "Please confirm which patient should be discharged."
+            );
+            return true;
+          }
+          setDischargeWorkflow({
+            patientId: resolved.patient.id,
+            patientName: resolved.patient.name,
+            step: "confirm",
+          });
+          setDischargeConfirmId(resolved.patient.id);
+          pushLocalAssistantResponse(
+            command,
+            `Are you sure you want to discharge ${resolved.patient.name}?`
+          );
+          return true;
+        }
+
+        const resolved = resolvePatientForModification(patients, {
+          transcript: command,
+          patientHint: parsedVoice.patientHint,
+          activePatientId: selectedPatientId,
+        });
+        if (resolved.status === "ambiguous") {
+          pushLocalAssistantResponse(
+            command,
+            resolved.message || formatAmbiguousPatientPrompt(resolved.patients)
+          );
+          return true;
+        }
+        if (resolved.status === "not_found" && parsedVoice.confidence === "high") {
+          if (parsedVoice.intent === "patientSummary") {
+            pushLocalAssistantResponse(
+              command,
+              resolved.message ?? "I could not find that patient on the roster."
+            );
+            return true;
+          }
+          const explicitName = extractModificationPatientName(
+            command,
+            parsedVoice.patientHint
+          );
+          if (explicitName) {
+            pushLocalAssistantResponse(
+              command,
+              resolved.message ?? "I could not find that patient on the roster."
+            );
+            return true;
+          }
+          if (
+            parsedVoice.intent !== "addSymptom" &&
+            parsedVoice.intent !== "removeSymptom" &&
+            parsedVoice.intent !== "updateSymptomStatus" &&
+            parsedVoice.intent !== "updateChiefConcern" &&
+            parsedVoice.intent !== "addChartNote" &&
+            parsedVoice.intent !== "updateMedicationDosage" &&
+            parsedVoice.intent !== "removeMedication" &&
+            parsedVoice.intent !== "replaceMedication"
+          ) {
+            pushLocalAssistantResponse(
+              command,
+              resolved.message ?? "I could not find that patient on the roster."
+            );
+            return true;
+          }
+        }
+
+        const explicitName = extractModificationPatientName(
+          command,
+          parsedVoice.patientHint
+        );
+        const targetPatient =
+          resolved.status === "matched"
+            ? resolved.patient
+            : !explicitName && selectedPatientId
+              ? patients.find((p) => p.id === selectedPatientId) ?? null
+              : null;
+
+        if (!targetPatient && parsedVoice.confidence === "high") {
+          pushLocalAssistantResponse(
+            command,
+            "Please specify which patient you would like to update."
+          );
+          return true;
+        }
+
+        if (targetPatient) {
+          const providerName =
+            role === "doctor" && user?.userName
+              ? formatDoctorDisplayName(user.userName)
+              : user?.userName ?? "Provider";
+          const result = applyParsedCommandToPatient(
+            targetPatient,
+            parsedVoice,
+            providerName
+          );
+          if (result) {
+            if (Object.keys(result.patch).length > 0) {
+              const ok = await persistPatientPatch(
+                targetPatient.id,
+                result.patch,
+                apiRole
+              );
+              if (!ok) {
+                pushLocalAssistantResponse(command, "Update failed. Try again.");
+                return true;
+              }
+              if (result.undo) lastUndoRef.current = result.undo;
+              await refreshPatients();
+              if (selectedPatientId !== targetPatient.id) {
+                setSelectedPatientId(targetPatient.id);
+              }
+            }
+            pushLocalAssistantResponse(command, result.message);
+            return true;
+          }
+        }
+      }
+
+      const focusedPatientEarly = findFocusedPatientFromCommand(command, patients);
 
       const finalizeAdmissionConversation = async (
         draft: AdmissionDraft,
@@ -3820,43 +4070,43 @@ export default function VitalOsClient() {
         return true;
       }
 
-      const focusedPatient = findFocusedPatientFromCommand(command, patients);
+      const focusedPatient = focusedPatientEarly ?? findFocusedPatientFromCommand(command, patients);
       if (focusedPatient) {
         setSelectedPatientId(focusedPatient.id);
       }
 
-      if (isDischargeIntent(lower)) {
-        const matches = findAllPatientMatches(command, patients);
-        const active =
-          (selectedPatientId && patients.find((p) => p.id === selectedPatientId)) || null;
-        const targets = matches.length > 0 ? matches : active ? [active] : [];
-        if (targets.length === 0) {
+      if (isDischargeIntent(lower) && !dischargeWorkflow) {
+        const parsedDischarge = parsePatientCommand(command);
+        const resolved = resolvePatientForModification(patients, {
+          transcript: command,
+          patientHint: parsedDischarge.patientHint,
+          activePatientId: selectedPatientId,
+        });
+        if (resolved.status === "ambiguous") {
           pushLocalAssistantResponse(
             command,
-            "Please confirm which patient should be discharged."
+            resolved.message || formatAmbiguousPatientPrompt(resolved.patients)
           );
           return true;
         }
-        for (const target of targets) {
-          const res = await fetch(`/api/patients/${encodeURIComponent(target.id)}`, {
-            method: "DELETE",
-            headers: roleRequestHeaders(apiRole),
-          });
-          if (!res.ok) {
-            pushLocalAssistantResponse(command, "Discharge failed. Try again.");
-            return true;
-          }
-          if (selectedPatientId === target.id) {
-            setRequestedPatientView(null);
-            setActiveRequestedSections([]);
-            setSelectedPatientId(null);
-          }
-          setOpenPatientTabIds((prev) => prev.filter((tabId) => tabId !== target.id));
+        if (resolved.status === "not_found") {
+          pushLocalAssistantResponse(
+            command,
+            resolved.message ??
+              "Please confirm which patient should be discharged."
+          );
+          return true;
         }
-        await refreshPatients();
+        const target = resolved.patient;
+        setDischargeWorkflow({
+          patientId: target.id,
+          patientName: target.name,
+          step: "confirm",
+        });
+        setDischargeConfirmId(target.id);
         pushLocalAssistantResponse(
           command,
-          `Discharged: ${targets.map((target) => target.name).join(", ")}. Roster updated.`
+          `Are you sure you want to discharge ${target.name}?`
         );
         return true;
       }
@@ -3882,14 +4132,21 @@ export default function VitalOsClient() {
 
       if (matchesStatusIntent(command)) {
         const status = detectStatusValue(command);
-        const patientMatches = findAllPatientMatches(command, patients);
-        const active =
-          (selectedPatientId && patients.find((p) => p.id === selectedPatientId)) || null;
+        const resolved = resolvePatientForModification(patients, {
+          transcript: command,
+          activePatientId: selectedPatientId,
+        });
         const target =
-          focusedPatient ??
-          (patientMatches.length === 1
-            ? patientMatches[0]
-            : findPatientMatches(command, patients)[0] ?? active);
+          resolved.status === "matched"
+            ? resolved.patient
+            : focusedPatient ?? null;
+        if (resolved.status === "ambiguous") {
+          pushLocalAssistantResponse(
+            command,
+            resolved.message || formatAmbiguousPatientPrompt(resolved.patients)
+          );
+          return true;
+        }
         if (!target || !status) {
           pushLocalAssistantResponse(
             command,
@@ -4022,10 +4279,23 @@ export default function VitalOsClient() {
           return true;
         }
         const medication = orderIntent.medication;
-        const matches = findPatientMatches(command, patients);
-        const active =
-          (selectedPatientId && patients.find((p) => p.id === selectedPatientId)) || null;
-        const target = matches[0] ?? active;
+        const resolved = resolvePatientForModification(patients, {
+          transcript: command,
+          activePatientId: selectedPatientId,
+        });
+        if (resolved.status === "ambiguous") {
+          pushLocalAssistantResponse(
+            command,
+            resolved.message || formatAmbiguousPatientPrompt(resolved.patients)
+          );
+          return true;
+        }
+        const target =
+          resolved.status === "matched"
+            ? resolved.patient
+            : (selectedPatientId &&
+                patients.find((p) => p.id === selectedPatientId)) ||
+              null;
         if (!target) {
           pushLocalAssistantResponse(command, "Please confirm which patient should receive the medication.");
           return true;
@@ -4071,11 +4341,13 @@ export default function VitalOsClient() {
       pushLocalAssistantResponse,
       problemStateByPatient,
       role,
+      user,
       permissions,
       apiRole,
       refreshPatients,
       resumeVoiceCapture,
       logout,
+      dischargeWorkflow,
     ]
   );
 
@@ -4097,10 +4369,8 @@ export default function VitalOsClient() {
       setLastSubmittedTranscript(transcript);
       setLastCommand(transcript.trim());
 
-      if (!permissions.canUseAI) {
-        pushLocalAssistantResponse(transcript, AI_ASSISTANT_RESTRICTED_MESSAGE);
+      if (micMutedRef.current) {
         setSystemState("idle");
-        resumeVoiceCapture();
         return;
       }
 
@@ -4134,31 +4404,110 @@ export default function VitalOsClient() {
         return;
       }
 
-      if (dischargeConfirmId && isAffirmativeCommand(transcript)) {
-        const id = dischargeConfirmId;
-        const target = patients.find((p) => p.id === id);
-        const res = await fetch(`/api/patients/${encodeURIComponent(id)}`, {
-          method: "DELETE",
-          headers: roleRequestHeaders(apiRole),
-        });
+      if (dischargeWorkflowRef.current && isNegativeCommand(transcript)) {
+        setDischargeWorkflow(null);
         setDischargeConfirmId(null);
-        if (!res.ok) {
+        pushLocalAssistantResponse(transcript, "Discharge cancelled.");
+        setSystemState("idle");
+        resumeVoiceCapture();
+        return;
+      }
+
+      if (
+        dischargeWorkflowRef.current?.step === "confirm" &&
+        isAffirmativeCommand(transcript)
+      ) {
+        setDischargeWorkflow((prev) =>
+          prev ? { ...prev, step: "reason" } : null
+        );
+        pushLocalAssistantResponse(
+          transcript,
+          "What is the discharge reason? Options include Recovered, Transfer, Left against medical advice, Deceased, or Other."
+        );
+        setSystemState("idle");
+        resumeVoiceCapture();
+        return;
+      }
+
+      if (dischargeWorkflowRef.current?.step === "reason") {
+        const reason = parseDischargeReason(transcript);
+        if (!reason) {
+          pushLocalAssistantResponse(
+            transcript,
+            "Please state the discharge reason. For example: Recovered, Transfer, Left against medical advice, Deceased, or Other."
+          );
+          setSystemState("idle");
+          resumeVoiceCapture();
+          return;
+        }
+        const { patientId, patientName } = dischargeWorkflowRef.current;
+        const providerName =
+          role === "doctor" && user?.userName
+            ? formatDoctorDisplayName(user.userName)
+            : user?.userName ?? "Provider";
+        const ok = await persistPatientPatch(
+          patientId,
+          {
+            discharge: true,
+            dischargeReason: reason,
+            dischargedBy: providerName,
+            encounterStatus: "Discharged",
+          },
+          apiRole
+        );
+        if (!ok) {
           pushLocalAssistantResponse(transcript, "Discharge failed. Try again.");
           setSystemState("idle");
           resumeVoiceCapture();
           return;
         }
-        if (selectedPatientId === id) {
+        setDischargeWorkflow(null);
+        setDischargeConfirmId(null);
+        if (selectedPatientId === patientId) {
           setRequestedPatientView(null);
           setActiveRequestedSections([]);
           setSelectedPatientId(null);
         }
-        setOpenPatientTabIds((prev) => prev.filter((tabId) => tabId !== id));
+        setOpenPatientTabIds((prev) => prev.filter((tabId) => tabId !== patientId));
         await refreshPatients();
         pushLocalAssistantResponse(
           transcript,
-          `Discharged: ${target?.name ?? "patient"}. Roster updated.`
+          `${patientName} has been discharged. Reason: ${reason}. Patient moved to discharged list.`
         );
+        setSystemState("idle");
+        resumeVoiceCapture();
+        return;
+      }
+
+      if (dischargeConfirmId && isAffirmativeCommand(transcript)) {
+        const id = dischargeConfirmId;
+        const target = patients.find((p) => p.id === id);
+        setDischargeWorkflow({
+          patientId: id,
+          patientName: target?.name ?? "patient",
+          step: "reason",
+        });
+        pushLocalAssistantResponse(
+          transcript,
+          "What is the discharge reason? Options include Recovered, Transfer, Left against medical advice, Deceased, or Other."
+        );
+        setSystemState("idle");
+        resumeVoiceCapture();
+        return;
+      }
+
+      const localParsedEarly = parsePatientCommand(transcript);
+      if (localParsedEarly.intent !== "unknown") {
+        const handledLocal = await handleClinicalCommand(transcript);
+        if (handledLocal) {
+          setSystemState("idle");
+          resumeVoiceCapture();
+          return;
+        }
+      }
+
+      if (!permissions.canUseAI) {
+        pushLocalAssistantResponse(transcript, AI_ASSISTANT_RESTRICTED_MESSAGE);
         setSystemState("idle");
         resumeVoiceCapture();
         return;
@@ -4330,6 +4679,8 @@ export default function VitalOsClient() {
       queueMedicationFromDraft,
       pendingMedicationOrder,
       dischargeConfirmId,
+      dischargeWorkflow,
+      user,
       pushLocalAssistantResponse,
       role,
       permissions,
@@ -4436,7 +4787,11 @@ export default function VitalOsClient() {
       u.onstart = () => {
         setSystemState("speaking");
         const kickMic = () => {
-          if (!voiceSessionActiveRef.current || !listeningIntentRef.current) {
+          if (
+            !voiceSessionActiveRef.current ||
+            !listeningIntentRef.current ||
+            micMutedRef.current
+          ) {
             return;
           }
           const rec = recognitionRef.current;
@@ -4453,7 +4808,7 @@ export default function VitalOsClient() {
       };
       u.onend = () => {
         setSystemState("idle");
-        if (voiceSessionActiveRef.current) {
+        if (voiceSessionActiveRef.current && !micMutedRef.current && listeningIntentRef.current) {
           globalThis.setTimeout(
             () => startListeningContinueRef.current({ hard: false }),
             400
@@ -4462,7 +4817,7 @@ export default function VitalOsClient() {
       };
       u.onerror = () => {
         setSystemState("idle");
-        if (voiceSessionActiveRef.current) {
+        if (voiceSessionActiveRef.current && !micMutedRef.current && listeningIntentRef.current) {
           globalThis.setTimeout(
             () => startListeningContinueRef.current({ hard: false }),
             500
@@ -4554,9 +4909,28 @@ export default function VitalOsClient() {
     }
     setMicMuted((prev) => {
       const next = !prev;
+      micMutedRef.current = next;
       if (next) {
         listeningIntentRef.current = false;
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
+        setInterimTranscript("");
+        setFinalTranscript("");
+        finalRef.current = "";
+        interimRef.current = "";
+        setHeardPreview("");
+        ignoreNextEndRef.current = true;
+        try {
+          recognitionRef.current?.abort();
+        } catch {
+          /* noop */
+        }
+        recognitionRef.current = null;
+        recognitionActiveRef.current = false;
         stopListening({ submit: false });
+        setSystemState("idle");
       } else {
         listeningIntentRef.current = true;
         void startListening({ hard: false });
@@ -4917,7 +5291,6 @@ export default function VitalOsClient() {
                 type="button"
                 onClick={toggleMicMute}
                 disabled={
-                  !permissions.canUseAI ||
                   !supportsSpeech ||
                   systemState === "processing"
                 }
@@ -4925,13 +5298,10 @@ export default function VitalOsClient() {
                   "flex h-14 w-14 items-center justify-center rounded-full border-2 transition-all",
                   voiceSessionLive && !micMuted
                     ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-slate-300 bg-white text-slate-700",
-                  !permissions.canUseAI && "cursor-not-allowed opacity-50"
+                    : "border-slate-300 bg-white text-slate-700"
                 )}
                 title={
-                  !permissions.canUseAI
-                    ? AI_ASSISTANT_RESTRICTED_MESSAGE
-                    : !voiceSessionLive
+                  !voiceSessionLive
                     ? "Start voice session"
                     : voiceSessionLive && !micMuted
                     ? "Mic live - tap to mute"

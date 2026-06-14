@@ -20,6 +20,10 @@ create table if not exists public.patients (
   problems jsonb not null default '[]'::jsonb,
   emergency_contact jsonb not null default '{}'::jsonb,
   primary_contact_line text,
+  chart_notes jsonb not null default '[]'::jsonb,
+  discharged_at timestamptz,
+  discharge_reason text,
+  discharged_by text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
 

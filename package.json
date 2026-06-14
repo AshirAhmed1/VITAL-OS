@@ -9,7 +9,8 @@
     "build": "next build",
     "build:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true});\" && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:voice": "npx tsx lib/patient-command-parser.spec.ts && npx tsx lib/patient-identification.spec.ts"
   },
   "dependencies": {
     "@google/genai": "^2.3.0",

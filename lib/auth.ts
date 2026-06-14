@@ -185,7 +185,21 @@ export function isRestrictedClinicalPatch(patch: unknown): boolean {
   if (!patch || typeof patch !== "object") return false;
   const keys = Object.keys(patch as Record<string, unknown>);
   return keys.some((k) =>
-    ["problems", "edOrUrgentCourse", "triageAcuity", "chiefConcern"].includes(k)
+    [
+      "problems",
+      "edOrUrgentCourse",
+      "triageAcuity",
+      "chiefConcern",
+      "medications",
+      "room",
+      "status",
+      "encounterStatus",
+      "chartNotes",
+      "discharge",
+      "dischargedAt",
+      "dischargeReason",
+      "dischargedBy",
+    ].includes(k)
   );
 }
 

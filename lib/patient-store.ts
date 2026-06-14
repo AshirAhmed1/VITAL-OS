@@ -54,22 +54,99 @@ async function seedDemoPatientsIfEmpty(): Promise<void> {
   if (error) throw error;
 }
 
-async function fetchAllRows(): Promise<PatientRow[]> {
+function isDischargedStatus(status: string | null | undefined): boolean {
+  return /^discharged$/i.test((status ?? "").trim());
+}
+
+function isMissingColumnError(error: { message?: string }): boolean {
+  const msg = (error.message ?? "").toLowerCase();
+  return (
+    /column/.test(msg) &&
+    (/does not exist|could not find|unknown|schema cache/.test(msg) ||
+      /discharged_at|discharge_reason|discharged_by|chart_notes/.test(msg))
+  );
+}
+
+function stripOptionalPatientColumns(
+  rowPatch: Partial<PatientRow>
+): Partial<PatientRow> {
+  const { chart_notes, discharged_at, discharge_reason, discharged_by, ...rest } =
+    rowPatch;
+  return rest;
+}
+
+function filterActiveRows(rows: PatientRow[]): PatientRow[] {
+  return rows.filter(
+    (r) => !r.discharged_at && !isDischargedStatus(r.status)
+  );
+}
+
+function filterDischargedRows(rows: PatientRow[]): PatientRow[] {
+  return rows.filter(
+    (r) => Boolean(r.discharged_at) || isDischargedStatus(r.status)
+  );
+}
+
+async function fetchAllRows(activeOnly = true): Promise<PatientRow[]> {
   const supabase = getSupabase();
   await seedDemoPatientsIfEmpty();
 
-  const { data, error } = await supabase
-    .from("patients")
-    .select("*")
-    .order("name", { ascending: true });
+  let query = supabase.from("patients").select("*").order("name", { ascending: true });
+  if (activeOnly) {
+    query = query.is("discharged_at", null);
+  }
 
-  if (error) throw error;
-  return (data ?? []) as PatientRow[];
+  const { data, error } = await query;
+  if (error) {
+    if (/discharged_at/.test(error.message)) {
+      const fallback = await supabase
+        .from("patients")
+        .select("*")
+        .order("name", { ascending: true });
+      if (fallback.error) throw fallback.error;
+      const rows = (fallback.data ?? []) as PatientRow[];
+      return activeOnly ? filterActiveRows(rows) : rows;
+    }
+    throw error;
+  }
+  const rows = (data ?? []) as PatientRow[];
+  if (activeOnly) {
+    return rows.filter((r) => !isDischargedStatus(r.status));
+  }
+  return rows;
 }
 
 export async function listPatients(): Promise<DemoPatient[]> {
-  const rows = await fetchAllRows();
+  const rows = await fetchAllRows(true);
   return rows.map(rowToDemoPatient);
+}
+
+export async function listDischargedPatients(): Promise<DemoPatient[]> {
+  const supabase = getSupabase();
+  await seedDemoPatientsIfEmpty();
+  const { data, error } = await supabase
+    .from("patients")
+    .select("*")
+    .not("discharged_at", "is", null)
+    .order("discharged_at", { ascending: false });
+
+  if (error) {
+    if (/discharged_at/.test(error.message)) {
+      const fallback = await supabase
+        .from("patients")
+        .select("*")
+        .order("name", { ascending: true });
+      if (fallback.error) throw fallback.error;
+      return filterDischargedRows((fallback.data ?? []) as PatientRow[]).map(
+        rowToDemoPatient
+      );
+    }
+    throw error;
+  }
+  const rows = (data ?? []) as PatientRow[];
+  return rows
+    .filter((r) => Boolean(r.discharged_at) || isDischargedStatus(r.status))
+    .map(rowToDemoPatient);
 }
 
 export async function getPatientById(id: string): Promise<DemoPatient | undefined> {
@@ -120,6 +197,52 @@ export async function createPatientFromPayload(
   return { patient: created, event: { action: "created", patientId: created.id } };
 }
 
+async function tryUpdateRow(
+  idTrim: string,
+  rowPatch: Partial<PatientRow>
+): Promise<{ ok: true; row: PatientRow } | { ok: false; missingColumn: boolean; error: Error }> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("patients")
+    .update(rowPatch)
+    .eq("id", idTrim)
+    .select("*")
+    .single();
+
+  if (!error && data) {
+    return { ok: true, row: data as PatientRow };
+  }
+  const err = error ?? new Error("Update failed.");
+  return {
+    ok: false,
+    missingColumn: isMissingColumnError(err),
+    error: err instanceof Error ? err : new Error(String(err)),
+  };
+}
+
+async function appendDischargeProblemNote(
+  idTrim: string,
+  current: DemoPatient,
+  reason: string,
+  providerName: string
+): Promise<void> {
+  const stamp = new Date().toISOString().slice(0, 10);
+  const dischargeProblem = {
+    name: "Discharge summary",
+    status: reason,
+    since: `${providerName} · ${stamp}`,
+  };
+  const existing = current.problems ?? [];
+  const alreadyNoted = existing.some((p) =>
+    /^discharge summary$/i.test(p.name)
+  );
+  if (alreadyNoted) return;
+
+  await updatePatientById(idTrim, {
+    problems: [...existing, dischargeProblem],
+  });
+}
+
 export async function updatePatientById(
   id: string,
   patch: unknown
@@ -130,6 +253,12 @@ export async function updatePatientById(
       ? (patch as Record<string, unknown>)
       : {};
 
+  if (o.discharge === true) {
+    const reason = String(o.dischargeReason ?? "Other").trim() || "Other";
+    const providerName = String(o.dischargedBy ?? "Provider").trim() || "Provider";
+    return dischargePatientById(idTrim, reason, providerName);
+  }
+
   const current = await getPatientById(idTrim);
   if (!current) return null;
 
@@ -138,17 +267,82 @@ export async function updatePatientById(
     return { patient: current, event: { action: "updated", patientId: current.id } };
   }
 
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from("patients")
-    .update(rowPatch)
-    .eq("id", idTrim)
-    .select("*")
-    .single();
+  let attempt: Partial<PatientRow> = rowPatch;
+  for (let i = 0; i < 3; i++) {
+    const result = await tryUpdateRow(idTrim, attempt);
+    if (result.ok) {
+      const updated = rowToDemoPatient(result.row);
+      return { patient: updated, event: { action: "updated", patientId: updated.id } };
+    }
+    if (!result.missingColumn || i >= 2) {
+      throw result.error;
+    }
+    attempt = stripOptionalPatientColumns(attempt);
+    if (Object.keys(attempt).length === 0) {
+      throw result.error;
+    }
+  }
 
-  if (error) throw error;
-  const updated = rowToDemoPatient(data as PatientRow);
-  return { patient: updated, event: { action: "updated", patientId: updated.id } };
+  throw new Error("Failed to update patient.");
+}
+
+export async function dischargePatientById(
+  id: string,
+  reason: string,
+  providerName: string
+): Promise<{ patient: DemoPatient; event: PatientStoreEvent } | null> {
+  const idTrim = id.trim();
+  const current = await getPatientById(idTrim);
+  if (!current) return null;
+
+  const fullPatch = patchToRowUpdate(
+    {
+      discharge: true,
+      dischargeReason: reason,
+      dischargedBy: providerName,
+      encounterStatus: "Discharged",
+    },
+    current
+  );
+
+  const attempts: Partial<PatientRow>[] = [
+    fullPatch,
+    stripOptionalPatientColumns(fullPatch),
+    { status: "Discharged" },
+  ];
+
+  for (const attempt of attempts) {
+    if (Object.keys(attempt).length === 0) continue;
+    const result = await tryUpdateRow(idTrim, attempt);
+    if (result.ok) {
+      if (!attempt.discharged_at) {
+        try {
+          await appendDischargeProblemNote(idTrim, current, reason, providerName);
+        } catch {
+          /* discharge status saved; note is best-effort */
+        }
+      }
+      const refreshed = await getPatientById(idTrim);
+      const patient = refreshed ?? rowToDemoPatient(result.row);
+      return { patient, event: { action: "updated", patientId: idTrim } };
+    }
+    if (!result.missingColumn) {
+      break;
+    }
+  }
+
+  const deleted = await deletePatientById(idTrim);
+  if (!deleted) return null;
+  return {
+    patient: {
+      ...current,
+      encounterStatus: "Discharged",
+      dischargeReason: reason,
+      dischargedBy: providerName,
+      dischargedAt: new Date().toISOString(),
+    },
+    event: { action: "deleted", patientId: idTrim },
+  };
 }
 
 export async function deletePatientById(
@@ -237,6 +431,17 @@ function snakeToPatchPayload(
   copy("emergency_contact", "emergencyContact");
   copy("primary_contact_line", "primaryContactLine");
   copy("status", "status");
+  copy("encounter_status", "encounterStatus");
+  copy("encounterStatus", "encounterStatus");
+  copy("chart_notes", "chartNotes");
+  copy("chartNotes", "chartNotes");
+  copy("discharged_at", "dischargedAt");
+  copy("dischargedAt", "dischargedAt");
+  copy("discharge_reason", "dischargeReason");
+  copy("dischargeReason", "dischargeReason");
+  copy("discharged_by", "dischargedBy");
+  copy("dischargedBy", "dischargedBy");
+  if (a.discharge !== undefined) out.discharge = a.discharge;
   return out;
 }
 

@@ -24,6 +24,12 @@ export type DbEmergencyContact = {
   phone: string;
 };
 
+export type DbChartNote = {
+  text: string;
+  timestamp: string;
+  provider: string;
+};
+
 export type PatientRow = {
   id: string;
   mrn: string;
@@ -43,6 +49,10 @@ export type PatientRow = {
   problems: DbProblem[] | null;
   emergency_contact: DbEmergencyContact | null;
   primary_contact_line: string | null;
+  chart_notes?: DbChartNote[] | null;
+  discharged_at?: string | null;
+  discharge_reason?: string | null;
+  discharged_by?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -190,6 +200,47 @@ function problemsFromDb(problems: DbProblem[] | null | undefined): PatientProble
   }));
 }
 
+function splitProblemsAndSymptoms(problems: DbProblem[] | null | undefined): {
+  diagnoses: PatientProblem[];
+  symptoms: string[];
+  symptomProblems: PatientProblem[];
+} {
+  const all = problemsFromDb(problems);
+  const symptomProblems = all.filter((p) => p.since === "Symptom");
+  const diagnoses = all.filter((p) => p.since !== "Symptom");
+  return {
+    diagnoses,
+    symptoms: symptomProblems.map((s) => s.name),
+    symptomProblems,
+  };
+}
+
+function chartNotesFromDb(notes: DbChartNote[] | null | undefined) {
+  if (!notes?.length) return [];
+  return notes.map((n) => ({
+    text: n.text,
+    timestamp: n.timestamp,
+    provider: n.provider,
+  }));
+}
+
+function chartNotesToDb(notes: unknown): DbChartNote[] {
+  if (!Array.isArray(notes)) return [];
+  const out: DbChartNote[] = [];
+  for (const item of notes) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const text = String(o.text ?? "").trim();
+    if (!text) continue;
+    out.push({
+      text,
+      timestamp: String(o.timestamp ?? new Date().toISOString()).trim(),
+      provider: String(o.provider ?? "Unknown").trim() || "Unknown",
+    });
+  }
+  return out;
+}
+
 function emergencyContactToDb(
   contact: unknown,
   primaryLine?: string | null
@@ -240,6 +291,10 @@ export function demoPatientToRow(p: DemoPatient): Omit<PatientRow, "created_at" 
     problems,
     emergency_contact: ec,
     primary_contact_line: ec.phone !== "Not listed" ? ec.phone : null,
+    chart_notes: [],
+    discharged_at: null,
+    discharge_reason: null,
+    discharged_by: null,
   };
 }
 
@@ -254,8 +309,12 @@ function deriveStatusFromPatient(p: DemoPatient): string {
 }
 
 export function rowToDemoPatient(row: PatientRow): DemoPatient {
-  const problems = problemsFromDb(row.problems);
-  const problemNames = problems.map((p) => p.name);
+  const { diagnoses, symptoms, symptomProblems } = splitProblemsAndSymptoms(row.problems);
+  const problemNames = diagnoses.map((p) => p.name);
+  const chartNotes = chartNotesFromDb(row.chart_notes);
+  const dischargeSummary = [...diagnoses, ...symptomProblems].find((p) =>
+    /^discharge summary$/i.test(p.name)
+  );
   const emergencyContact = row.emergency_contact ?? {
     name: "Not listed",
     relationship: "Not listed",
@@ -278,14 +337,23 @@ export function rowToDemoPatient(row: PatientRow): DemoPatient {
     triageAcuity: row.acuity?.trim() || "Not assigned",
     allergies: allergiesFromDb(row.allergies),
     chiefConcern: row.chief_concern?.trim() || "Not specified",
-    symptoms: [],
+    symptoms,
     diagnoses: problemNames,
-    problems,
+    problems: [...diagnoses, ...symptomProblems],
     medications: medicationsFromDb(row.medications),
     vitals: {},
     lastVisit: isoDateOnly(row.last_visit),
     social: "",
-    chartNote: "",
+    chartNote: chartNotes.map((n) => n.text).join(" ") || "",
+    chartNotes,
+    encounterStatus: row.status?.trim() || undefined,
+    dischargedAt: row.discharged_at ?? null,
+    dischargeReason:
+      row.discharge_reason?.trim() || dischargeSummary?.status || null,
+    dischargedBy:
+      row.discharged_by?.trim() ||
+      dischargeSummary?.since?.split(" · ")[0] ||
+      null,
     pcp: row.provider?.trim() || undefined,
     emergencyContact: {
       name: emergencyContact.name,
@@ -356,6 +424,37 @@ export function patchToRowUpdate(
   if (patch.medications !== undefined) {
     merged.medications = medicationsFromDb(medicationsToDb(patch.medications));
     out.medications = medicationsToDb(patch.medications);
+  }
+  if (typeof patch.status === "string" && patch.status.trim()) {
+    out.status = patch.status.trim();
+    merged.encounterStatus = out.status;
+  }
+  if (typeof patch.encounterStatus === "string" && patch.encounterStatus.trim()) {
+    merged.encounterStatus = patch.encounterStatus.trim();
+    out.status = merged.encounterStatus;
+  }
+  if (patch.chartNotes !== undefined) {
+    merged.chartNotes = chartNotesFromDb(chartNotesToDb(patch.chartNotes));
+    merged.chartNote = merged.chartNotes.map((n) => n.text).join(" ");
+    out.chart_notes = chartNotesToDb(patch.chartNotes);
+  }
+  if (patch.dischargedAt !== undefined) {
+    merged.dischargedAt = patch.dischargedAt as string | null;
+    out.discharged_at = merged.dischargedAt;
+  }
+  if (typeof patch.dischargeReason === "string") {
+    merged.dischargeReason = patch.dischargeReason.trim() || null;
+    out.discharge_reason = merged.dischargeReason;
+  }
+  if (typeof patch.dischargedBy === "string") {
+    merged.dischargedBy = patch.dischargedBy.trim() || null;
+    out.discharged_by = merged.dischargedBy;
+  }
+  if (typeof patch.discharge === "boolean" && patch.discharge) {
+    merged.dischargedAt = new Date().toISOString();
+    out.discharged_at = merged.dischargedAt;
+    merged.encounterStatus = "Discharged";
+    out.status = "Discharged";
   }
 
   const problemsTouched =

@@ -11,6 +11,12 @@ export type PatientProblem = {
   since?: string;
 };
 
+export type ChartNote = {
+  text: string;
+  timestamp: string;
+  provider: string;
+};
+
 export type DemoPatient = {
   id: string;
   mrn: string;
@@ -33,6 +39,11 @@ export type DemoPatient = {
   lastVisit: string;
   social: string;
   chartNote: string;
+  chartNotes?: ChartNote[];
+  encounterStatus?: string;
+  dischargedAt?: string | null;
+  dischargeReason?: string | null;
+  dischargedBy?: string | null;
   pcp?: string;
   codeStatus?: string;
   emergencyContact: {

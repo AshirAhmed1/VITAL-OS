@@ -6,15 +6,20 @@ import {
 } from "@/lib/auth";
 import {
   createPatientFromPayload,
+  listDischargedPatients,
   listPatients,
 } from "@/lib/patient-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const patients = await listPatients();
+    const url = new URL(req.url);
+    const discharged = url.searchParams.get("discharged") === "true";
+    const patients = discharged
+      ? await listDischargedPatients()
+      : await listPatients();
     return NextResponse.json(
       { patients },
       { headers: { "Cache-Control": "no-store" } }
