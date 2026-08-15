@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { AuthProvider } from "@/components/auth-provider";
 import { AppGate } from "@/components/app-gate";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 const inter = Inter({
@@ -34,7 +35,10 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0a1015",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F8FAFC" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0612" },
+  ],
 };
 
 export default function RootLayout({
@@ -43,11 +47,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`dark ${inter.variable}`} suppressHydrationWarning>
-      <body className="min-h-screen font-sans antialiased" suppressHydrationWarning>
-        <AuthProvider>
-          <AppGate>{children}</AppGate>
-        </AuthProvider>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body className="min-h-screen bg-background font-sans antialiased text-foreground" suppressHydrationWarning>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem={false}
+          storageKey="vital-os-theme"
+          disableTransitionOnChange={false}
+        >
+          <AuthProvider>
+            <AppGate>{children}</AppGate>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

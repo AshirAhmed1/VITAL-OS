@@ -38,6 +38,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ThemeAppearanceControl } from "@/components/theme-appearance-control";
 import {
   VoiceHeroVisual,
   type VoiceHeroVisualHandle,
@@ -358,6 +359,17 @@ function statusBadgeVariant(
   if (status === "Imaging ordered") return "medications";
   if (status === "Awaiting physician") return "allergies";
   return "notes";
+}
+
+function acuityBadgeVariant(
+  acuity: string
+): "ctas1" | "ctas2" | "ctas3" | "ctas4" | "ctas5" | "default" {
+  if (/ctas\s*1/i.test(acuity)) return "ctas1";
+  if (/ctas\s*2/i.test(acuity)) return "ctas2";
+  if (/ctas\s*3/i.test(acuity)) return "ctas3";
+  if (/ctas\s*4/i.test(acuity)) return "ctas4";
+  if (/ctas\s*5/i.test(acuity)) return "ctas5";
+  return "default";
 }
 
 function normalizeProblemKey(problem: string): string {
@@ -5165,7 +5177,7 @@ export default function VitalOsClient() {
   );
   const unitDonut = React.useMemo(() => {
     const total = unitDistribution.reduce((sum, item) => sum + item.value, 0);
-    const palette = ["#0ea5e9", "#06b6d4", "#3b82f6", "#14b8a6", "#f59e0b"];
+    const palette = ["#0284C7", "#64748B", "#0EA5E9", "#10B981", "#FBBF24"];
     if (!total) return { background: "#e2e8f0" };
     let cursor = 0;
     const stops = unitDistribution.map((item, idx) => {
@@ -5220,30 +5232,30 @@ export default function VitalOsClient() {
   });
 
   return (
-    <main className="min-h-screen bg-[#f7fbff] text-slate-900">
+    <main className="min-h-screen bg-background text-foreground">
       <AnimatePresence>
         {orderNotice && (
           <motion.div
             initial={{ opacity: 0, y: -8, x: 12 }}
             animate={{ opacity: 1, y: 0, x: 0 }}
             exit={{ opacity: 0, y: -8, x: 12 }}
-            className="fixed right-4 top-4 z-50 rounded-lg border border-cyan-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-md"
+            className="fixed right-4 top-4 z-50 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground"
           >
             {orderNotice}
           </motion.div>
         )}
       </AnimatePresence>
-      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[120px_minmax(0,1fr)_350px]">
-        <aside className="hidden border-r border-[#133a71] bg-[#0B2A55] px-2 py-4 text-white lg:flex lg:flex-col">
-          <div className="mb-7 flex items-center justify-center px-1">
+      <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[112px_minmax(0,1fr)_320px]">
+        <aside className="hidden border-r border-sidebar-border bg-sidebar px-2 py-4 text-sidebar-foreground lg:flex lg:flex-col">
+          <div className="mb-6 flex items-center justify-center px-1">
             <VitalLogo
-              size={36}
+              size={32}
               variant="stacked"
-              textClassName="text-blue-50"
-              className="rounded-xl bg-white/5 px-3 py-2.5"
+              textClassName="text-sidebar-foreground"
+              className="rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2.5"
             />
           </div>
-          <nav className="space-y-2">
+          <nav className="flex flex-1 flex-col gap-1">
             {[
               { key: "dashboard" as ActivePage, label: "Dashboard", icon: Home, show: true },
               { key: "patients" as ActivePage, label: "Patients", icon: Users, show: true },
@@ -5276,10 +5288,10 @@ export default function VitalOsClient() {
                   type="button"
                   onClick={() => setActivePage(item.key)}
                   className={cn(
-                    "flex h-12 w-full flex-col items-center justify-center gap-1 rounded-xl px-2 text-center text-[11px] font-medium transition-colors",
+                    "flex h-12 w-full flex-col items-center justify-center gap-1 rounded-lg px-2 text-center text-[11px] font-medium transition-colors",
                     activePage === item.key
-                      ? "bg-white/15 text-white"
-                      : "text-blue-100/85 hover:bg-white/10"
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-muted hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
@@ -5288,41 +5300,36 @@ export default function VitalOsClient() {
               );
             })}
           </nav>
-          <div className="mt-auto flex flex-col gap-2 pt-4">
+          <div className="mt-auto flex flex-col gap-2 border-t border-sidebar-border pt-3">
             <button
               type="button"
               onClick={handleSignOut}
-              className="flex h-12 w-full flex-col items-center justify-center gap-1 rounded-xl px-2 text-center text-[11px] font-medium text-blue-100/85 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+              className="flex h-12 w-full flex-col items-center justify-center gap-1 rounded-lg px-2 text-center text-[11px] font-medium text-sidebar-muted transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
               title="Sign out and return to role selection"
             >
               <LogOut className="h-4 w-4 shrink-0" aria-hidden />
               <span className="leading-none">Sign Out</span>
             </button>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-2 text-center text-[11px] text-blue-100/80">
+            <div className="px-1 text-center text-[10px] font-medium uppercase tracking-wide text-sidebar-muted">
               HIPAA Secure
             </div>
           </div>
         </aside>
 
-        <section className="flex min-h-screen flex-col bg-white px-4 py-4 lg:px-4 lg:py-4">
-          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-[#0B2A55] px-4 py-2 text-white shadow-sm">
-            <VitalLogo size={22} variant="full" textClassName="text-white" />
-            <div className="ml-auto flex items-center gap-2">
-              <Badge
-                variant="outline"
-                className="inline-flex items-center gap-2 bg-white/85 text-slate-900 border-white/75 hover:bg-white/95"
-              >
-                <VitalLogo
-                  size={12}
-                  variant="icon"
-                  className={cn(systemState === "listening" ? "animate-pulse" : "")}
+        <section className="flex min-h-screen flex-col bg-background px-4 py-4 lg:px-5 lg:py-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+            <VitalLogo size={22} variant="full" textClassName="font-medium text-foreground" />
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="inline-flex items-center gap-2">
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    systemState === "listening" ? "bg-emerald-500" : "bg-muted-foreground"
+                  )}
                 />
                 System Ready
               </Badge>
-              <Badge
-                variant="notes"
-                className="bg-teal-100/95 text-teal-950 border-teal-300/90"
-              >
+              <Badge variant="clinical">
                 {role === "doctor" && user?.doctorId
                   ? `Doctor Mode · ${formatDoctorDisplayName(user.userName)}`
                   : role === "doctor"
@@ -5336,142 +5343,137 @@ export default function VitalOsClient() {
                   Care Mode: {MODE_LABEL[mode]}
                 </Badge>
               )}
-              <span className="ml-2 text-sm font-medium tabular-nums">{fmtTime(now)}</span>
+              <span className="ml-1 text-sm font-medium tabular-nums text-muted-foreground">{fmtTime(now)}</span>
             </div>
           </div>
 
-          <div className="sticky top-3 z-30 mb-3 rounded-2xl border border-[#dce9fb] bg-white/95 px-4 py-3 shadow-sm backdrop-blur-sm">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={toggleMicMute}
-                disabled={
-                  !supportsSpeech ||
-                  systemState === "processing"
-                }
-                className={cn(
-                  "flex h-14 w-14 items-center justify-center rounded-full border-2 transition-all",
-                  voiceSessionLive && !micMuted
-                    ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-slate-300 bg-white text-slate-700"
-                )}
-                title={
-                  !voiceSessionLive
-                    ? "Start voice session"
-                    : voiceSessionLive && !micMuted
-                    ? "Mic live - tap to mute"
-                    : "Mic muted - tap to unmute"
-                }
-              >
-                {voiceSessionLive && !micMuted ? (
-                  <Mic className="h-6 w-6" />
-                ) : (
-                  <MicOff className="h-6 w-6" />
-                )}
-              </button>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-slate-700">
+          <div className="mb-3 flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5">
+            <button
+              type="button"
+              onClick={toggleMicMute}
+              disabled={
+                !supportsSpeech ||
+                systemState === "processing"
+              }
+              className={cn(
+                "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition-colors",
+                voiceSessionLive && !micMuted
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-card text-muted-foreground hover:bg-muted"
+              )}
+              title={
+                !voiceSessionLive
+                  ? "Start voice session"
+                  : voiceSessionLive && !micMuted
+                  ? "Mic live - tap to mute"
+                  : "Mic muted - tap to unmute"
+              }
+            >
+              {voiceSessionLive && !micMuted ? (
+                <Mic className="h-5 w-5" />
+              ) : (
+                <MicOff className="h-5 w-5" />
+              )}
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                <p className="text-sm font-medium text-foreground">
                   {voiceSessionLive && micMuted
-                    ? "Microphone muted - click to resume listening"
+                    ? "Microphone muted"
                     : systemState === "listening"
-                      ? "Listening..."
+                      ? "Listening"
                       : systemState === "speaking"
-                        ? "AI speaking - you can interrupt by talking"
+                        ? "AI speaking"
                         : systemState === "processing"
-                          ? "Processing clinician command..."
+                          ? "Processing"
                           : "System ready"}
                 </p>
-                <div className="mt-2 h-8 overflow-hidden rounded-xl border border-slate-200 bg-white px-2">
-                  <div className="flex h-full items-end gap-1">
-                    {waveformBars.map((h, i) => (
-                      <span
-                        key={`wf-${i}`}
-                        className="w-1 rounded-full bg-blue-500/70 transition-all duration-100"
-                        style={{ height: `${h}px` }}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-slate-600">
-                  Last heard:{" "}
-                  <span className="font-medium text-slate-900">
-                    {heardPreview.trim() ||
-                      interimTranscript.trim() ||
-                      finalTranscript.trim() ||
-                      lastSubmittedTranscript.trim() ||
-                      "Listening for clinician command..."}
-                  </span>
+                <p className="truncate text-xs text-muted-foreground">
+                  {heardPreview.trim() ||
+                    interimTranscript.trim() ||
+                    finalTranscript.trim() ||
+                    lastSubmittedTranscript.trim() ||
+                    "Listening for clinician command"}
                 </p>
-                {error ? (
-                  <p className="mt-2 text-xs text-red-600">{error}</p>
-                ) : null}
-                {!permissions.canUseAI ? (
-                  <p className="mt-2 text-xs text-amber-800">
-                    {AI_ASSISTANT_RESTRICTED_MESSAGE}
-                  </p>
-                ) : null}
-                {typedCommandOpen && permissions.canUseAI && (
-                  <input
-                    value={typedCommand}
-                    onChange={(e) => setTypedCommand(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key !== "Enter") return;
-                      const text = typedCommand.trim();
-                      if (!text) return;
-                      setTypedCommand("");
-                      void submitRef.current(text);
-                    }}
-                    placeholder="Type a clinical command..."
-                    className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-300"
+              </div>
+              <div className="mt-1.5 flex h-5 items-end gap-0.5 overflow-hidden">
+                {waveformBars.map((h, i) => (
+                  <span
+                    key={`wf-${i}`}
+                    className="w-0.5 rounded-full bg-primary/70 transition-all duration-100"
+                    style={{ height: `${Math.max(2, Math.min(h, 16))}px` }}
                   />
-                )}
+                ))}
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!permissions.canUseAI) return;
-                    setTypedCommandOpen((v) => !v);
+              {error ? (
+                <p className="mt-1 text-xs text-destructive">{error}</p>
+              ) : null}
+              {!permissions.canUseAI ? (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                  {AI_ASSISTANT_RESTRICTED_MESSAGE}
+                </p>
+              ) : null}
+              {typedCommandOpen && permissions.canUseAI && (
+                <input
+                  value={typedCommand}
+                  onChange={(e) => setTypedCommand(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    const text = typedCommand.trim();
+                    if (!text) return;
+                    setTypedCommand("");
+                    void submitRef.current(text);
                   }}
-                  disabled={!permissions.canUseAI}
-                  className={cn(
-                    "flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white",
-                    !permissions.canUseAI && "cursor-not-allowed opacity-50"
-                  )}
-                  title={
-                    permissions.canUseAI
-                      ? "Toggle typed command"
-                      : AI_ASSISTANT_RESTRICTED_MESSAGE
-                  }
-                >
-                  <Keyboard className="h-4 w-4" />
-                </button>
-                {systemState === "speaking" && (
-                  <button
-                    type="button"
-                    onClick={stopSpeaking}
-                    className="rounded-full border border-slate-300 bg-white px-3 py-2 text-sm"
-                  >
-                    Stop voice
-                  </button>
+                  placeholder="Type a clinical command..."
+                  className="vital-input mt-2"
+                />
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!permissions.canUseAI) return;
+                  setTypedCommandOpen((v) => !v);
+                }}
+                disabled={!permissions.canUseAI}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted",
+                  !permissions.canUseAI && "cursor-not-allowed opacity-50"
                 )}
+                title={
+                  permissions.canUseAI
+                    ? "Toggle typed command"
+                    : AI_ASSISTANT_RESTRICTED_MESSAGE
+                }
+              >
+                <Keyboard className="h-4 w-4" />
+              </button>
+              {systemState === "speaking" && (
                 <button
                   type="button"
-                  onClick={() => setVoiceEnabled((v) => !v)}
-                  disabled={!supportsTts}
-                  className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-300 bg-white"
-                  title={voiceEnabled ? "Mute AI voice" : "Unmute AI voice"}
+                  onClick={stopSpeaking}
+                  className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-muted"
                 >
-                  {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+                  Stop voice
                 </button>
-                <button
-                  type="button"
-                  onClick={endVoiceSession}
-                  className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600"
-                >
-                  End Session
-                </button>
-              </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setVoiceEnabled((v) => !v)}
+                disabled={!supportsTts}
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted"
+                title={voiceEnabled ? "Mute AI voice" : "Unmute AI voice"}
+              >
+                {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={endVoiceSession}
+                className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200 dark:hover:bg-rose-950/60"
+              >
+                End Session
+              </button>
             </div>
           </div>
 
@@ -5483,7 +5485,7 @@ export default function VitalOsClient() {
                   if (!activePatient) return;
                   void openRequestedView(activePatient, fullChartSections);
                 }}
-                className="inline-flex items-center gap-1 rounded-full border border-blue-100 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
               >
                 View Full Chart
                 <ChevronRight className="h-3.5 w-3.5" />
@@ -5494,15 +5496,15 @@ export default function VitalOsClient() {
           {activePage !== "dashboard" ? (
             <div className="grid gap-3">
               {activePage === "patients" && (
-                <div className="rounded-xl border border-[#e3edf9] bg-white p-4 shadow-sm">
+                <div className="vital-card p-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-900">Patient Roster</p>
+                    <p className="text-sm font-semibold text-foreground">Patient Roster</p>
                     <motion.div layout className="flex flex-wrap items-center gap-2">
                       <input
                         value={patientSearch}
                         onChange={(e) => setPatientSearch(e.target.value)}
                         placeholder="Search name, MRN, room..."
-                        className="w-64 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-900 outline-none focus:border-blue-300"
+                        className="w-64 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground outline-none focus:border-ring"
                       />
                       {permissions.canAdmitPatient ? (
                         <Button
@@ -5522,7 +5524,7 @@ export default function VitalOsClient() {
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
                         exit={{ opacity: 0, height: 0 }}
-                        className="mb-3 overflow-hidden rounded-xl border border-[#e3edf9] bg-[#f7fbff] p-3"
+                        className="mb-3 overflow-hidden vital-section p-3"
                       >
                         <motion.div layout className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                           {(
@@ -5534,7 +5536,7 @@ export default function VitalOsClient() {
                               ["chiefConcern", "Chief Concern", "text"],
                             ] as const
                           ).map(([key, label, type]) => (
-                            <label key={key} className="text-xs font-medium text-slate-700">
+                            <label key={key} className="text-xs font-medium text-foreground">
                               {label}
                               <input
                                 type={type}
@@ -5542,11 +5544,11 @@ export default function VitalOsClient() {
                                 onChange={(e) =>
                                   setAdmitDraft((prev) => ({ ...prev, [key]: e.target.value }))
                                 }
-                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 outline-none focus:border-blue-300"
+                                className="mt-1 w-full rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:border-ring"
                               />
                             </label>
                           ))}
-                          <label className="text-xs font-medium text-slate-700">
+                          <label className="text-xs font-medium text-foreground">
                             Acuity (CTAS 1-5)
                             <select
                               value={admitDraft.triageAcuity}
@@ -5556,7 +5558,7 @@ export default function VitalOsClient() {
                                   triageAcuity: e.target.value,
                                 }))
                               }
-                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 outline-none focus:border-blue-300"
+                              className="mt-1 w-full rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:border-ring"
                             >
                               {["CTAS 1", "CTAS 2", "CTAS 3", "CTAS 4", "CTAS 5"].map((level) => (
                                 <option key={level} value={level}>
@@ -5616,8 +5618,8 @@ export default function VitalOsClient() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-                  <div className="rounded-xl border border-slate-200">
-                    <motion.div layout className="grid grid-cols-[1.2fr_0.9fr_0.7fr_0.8fr_1.1fr_0.7fr_0.7fr_0.9fr] border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-700">
+                  <div className="rounded-xl border border-border">
+                    <motion.div layout className="grid grid-cols-[1.2fr_0.9fr_0.7fr_0.8fr_1.1fr_0.7fr_0.7fr_0.9fr] border-b border-border bg-muted px-3 py-2 text-xs font-semibold uppercase tracking-wide text-foreground">
                       <span>Patient</span>
                       <span>MRN</span>
                       <span>Age/Sex</span>
@@ -5636,44 +5638,31 @@ export default function VitalOsClient() {
                           void openRequestedView(p, fullChartSections);
                         }}
                         className={cn(
-                          "grid cursor-pointer grid-cols-[1.2fr_0.9fr_0.7fr_0.8fr_1.1fr_0.7fr_0.7fr_0.9fr] gap-2 border-b border-slate-100 px-3 py-2.5 text-left text-sm hover:bg-slate-50",
-                          selectedPatientId === p.id ? "bg-blue-50/60" : "bg-white"
+                          "grid cursor-pointer grid-cols-[1.2fr_0.9fr_0.7fr_0.8fr_1.1fr_0.7fr_0.7fr_0.9fr] gap-2 border-b border-border px-3 py-2.5 text-left text-sm hover:bg-muted",
+                          selectedPatientId === p.id ? "bg-primary/10" : "bg-card"
                         )}
                       >
-                        <span className="font-medium text-slate-900">
+                        <span className="font-medium text-foreground">
                           {p.name}
                           <PatientClinicalIndicator patient={p} />
                         </span>
-                        <span className="text-slate-900">{p.mrn}</span>
-                        <span className="text-slate-900">
+                        <span className="text-foreground">{p.mrn}</span>
+                        <span className="text-foreground">
                           {p.age}
                           {p.sex}
                         </span>
                         <span>
-                          <Badge variant="medications" className="px-2 py-0.5 text-[11px]">
+                          <Badge variant="medications">
                             {p.room}
                           </Badge>
                         </span>
-                        <span className="truncate text-slate-900">{p.chiefConcern}</span>
+                        <span className="truncate text-foreground">{p.chiefConcern}</span>
                         <span>
-                          <Badge
-                            variant={
-                              /ctas\s*1/i.test(p.triageAcuity)
-                                ? "risk"
-                                : /ctas\s*2/i.test(p.triageAcuity)
-                                  ? "warn"
-                                  : /ctas\s*3/i.test(p.triageAcuity)
-                                    ? "problems"
-                                    : /ctas\s*4/i.test(p.triageAcuity)
-                                      ? "medications"
-                                      : "notes"
-                            }
-                            className="px-2 py-0.5 text-[11px]"
-                          >
+                          <Badge variant={acuityBadgeVariant(p.triageAcuity)}>
                             {p.triageAcuity}
                           </Badge>
                         </span>
-                        <span className="text-xs text-slate-900">
+                        <span className="text-xs text-foreground">
                           {p.allergies.length ? "Allergy" : "Stable"}
                         </span>
                         <div
@@ -5681,9 +5670,9 @@ export default function VitalOsClient() {
                           onClick={(e) => e.stopPropagation()}
                         >
                           {!permissions.canDischargePatient ? (
-                            <span className="text-[10px] text-slate-500">—</span>
+                            <span className="text-[10px] text-muted-foreground">—</span>
                           ) : dischargeConfirmId === p.id ? (
-                            <div className="flex items-center gap-1 text-xs text-slate-700">
+                            <div className="flex items-center gap-1 text-xs text-foreground">
                               <span>Confirm discharge?</span>
                               <Button
                                 type="button"
@@ -5744,9 +5733,9 @@ export default function VitalOsClient() {
               )}
               {activePage === "encounters" && (
                 <div className="grid gap-3">
-                  <div className="rounded-xl border border-[#d9e8fb] bg-gradient-to-r from-cyan-50/70 to-blue-50 p-4 shadow-sm">
+                  <div className="vital-card p-4">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">Active Encounters</p>
+                      <p className="text-sm font-semibold text-foreground">Active Encounters</p>
                       <Badge variant="medications">{filteredEncounters.length} visible</Badge>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -5763,10 +5752,10 @@ export default function VitalOsClient() {
                           type="button"
                           onClick={() => setEncounterFilter(key as EncounterFilter)}
                           className={cn(
-                            "rounded-full border px-3 py-1 text-xs font-semibold transition-all",
+                            "rounded-lg border px-3 py-1 text-xs font-medium transition-colors",
                             encounterFilter === key
-                              ? "border-blue-300 bg-blue-100 text-blue-900 shadow-sm"
-                              : "border-slate-200 bg-white text-slate-600 hover:-translate-y-0.5 hover:border-blue-200 hover:text-slate-900"
+                              ? "border-primary bg-primary/10 text-primary"
+                              : "border-border bg-card text-muted-foreground hover:border-border hover:text-foreground"
                           )}
                         >
                           {label}
@@ -5783,25 +5772,25 @@ export default function VitalOsClient() {
                           setActivePage("dashboard");
                           void openRequestedView(patient, fullChartSections);
                         }}
-                        className="rounded-xl border border-[#dce8f8] bg-white p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                        className="vital-card-hover p-3 text-left"
                       >
                         <div className="mb-2 flex items-center justify-between gap-2">
-                          <p className="text-sm font-semibold text-slate-900">
+                          <p className="text-sm font-semibold text-foreground">
                             {patient.name}
                             <PatientClinicalIndicator patient={patient} />
                           </p>
                           <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-                          <p>MRN: <span className="font-medium text-slate-800">{patient.mrn}</span></p>
-                          <p>ROOM: <span className="font-medium text-slate-800">{patient.room}</span></p>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                          <p>MRN: <span className="font-medium text-foreground">{patient.mrn}</span></p>
+                          <p>ROOM: <span className="font-medium text-foreground">{patient.room}</span></p>
                           <p>
                             Acuity:{" "}
-                            <span className="font-medium text-slate-800">{patient.triageAcuity}</span>
+                            <span className="font-medium text-foreground">{patient.triageAcuity}</span>
                           </p>
-                          <p>Updated: <span className="font-medium text-slate-800">{updatedLabel}</span></p>
+                          <p>Updated: <span className="font-medium text-foreground">{updatedLabel}</span></p>
                         </div>
-                        <p className="mt-2 line-clamp-1 text-sm text-slate-700">{patient.chiefConcern}</p>
+                        <p className="mt-2 line-clamp-1 text-sm text-foreground">{patient.chiefConcern}</p>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <Badge variant="notes" className="text-[10px]">
                             Team: {(patient.careTeam ?? []).slice(0, 2).join(", ") || "Assigned"}
@@ -5814,13 +5803,13 @@ export default function VitalOsClient() {
                     ))}
                   </div>
                   <div className="grid gap-3 xl:grid-cols-2">
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">Recent Activity Feed</p>
+                    <div className="vital-card p-4">
+                      <p className="text-sm font-semibold text-foreground">Recent Activity Feed</p>
                       <div className="mt-3 space-y-2">
                         {activityFeed.slice(0, 6).map((item) => (
                           <div
                             key={item.id}
-                            className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2"
+                            className="flex items-start gap-2 rounded-lg border border-border bg-muted/70 px-3 py-2"
                           >
                             <Activity
                               className={cn(
@@ -5829,8 +5818,8 @@ export default function VitalOsClient() {
                               )}
                             />
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs text-slate-800">{item.text}</p>
-                              <p className="mt-0.5 text-[11px] text-slate-500">
+                              <p className="text-xs text-foreground">{item.text}</p>
+                              <p className="mt-0.5 text-[11px] text-muted-foreground">
                                 {item.room} • {item.at}
                               </p>
                             </div>
@@ -5838,16 +5827,16 @@ export default function VitalOsClient() {
                         ))}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">Room Occupancy</p>
+                    <div className="vital-card p-4">
+                      <p className="text-sm font-semibold text-foreground">Room Occupancy</p>
                       <div className="mt-3 space-y-2">
                         {roomOccupancy.map((item) => (
                           <div
                             key={`${item.room}-${item.patient}`}
-                            className="flex items-center justify-between rounded-lg border border-slate-100 bg-white px-3 py-2 text-xs"
+                            className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-xs"
                           >
-                            <span className="font-semibold text-slate-800">{item.room}</span>
-                            <span className="truncate px-2 text-slate-600">{item.patient}</span>
+                            <span className="font-semibold text-foreground">{item.room}</span>
+                            <span className="truncate px-2 text-muted-foreground">{item.patient}</span>
                             <Badge variant="notes">{item.acuity}</Badge>
                           </div>
                         ))}
@@ -5872,11 +5861,11 @@ export default function VitalOsClient() {
                     ].map(([title, value, variant]) => (
                       <div
                         key={String(title)}
-                        className="rounded-xl border border-[#dce8f8] bg-gradient-to-br from-white to-cyan-50/40 p-4 shadow-sm"
+                        className="vital-card p-4"
                       >
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
                         <div className="mt-2 flex items-center justify-between">
-                          <p className="text-2xl font-semibold text-slate-900">{value}</p>
+                          <p className="text-2xl font-semibold text-foreground">{value}</p>
                           <Badge variant={variant as "allergies" | "medications" | "problems" | "notes" | "risk"}>
                             Live
                           </Badge>
@@ -5884,8 +5873,8 @@ export default function VitalOsClient() {
                       </div>
                     ))}
                   </div>
-                  <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                    <p className="text-sm font-semibold text-slate-900">Generated Reports</p>
+                  <div className="vital-card p-4">
+                    <p className="text-sm font-semibold text-foreground">Generated Reports</p>
                     <div className="mt-3 grid gap-2 xl:grid-cols-2">
                       {[
                         ["ED Daily Summary", "Snapshot of active encounters and room occupancy.", patients.length, "Ready"],
@@ -5896,16 +5885,16 @@ export default function VitalOsClient() {
                       ].map(([title, desc, count, status]) => (
                         <div
                           key={String(title)}
-                          className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 shadow-sm"
+                          className="vital-card p-3"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-semibold text-slate-900">{title}</p>
+                            <p className="text-sm font-semibold text-foreground">{title}</p>
                             <Badge variant={status === "Pending" ? "problems" : "notes"}>{status}</Badge>
                           </div>
-                          <p className="mt-1 text-xs text-slate-600">{desc}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{desc}</p>
                           <div className="mt-3 flex items-center justify-between">
-                            <p className="text-xs text-slate-500">{count} records</p>
-                            <button className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-900 transition-colors hover:bg-cyan-100">
+                            <p className="text-xs text-muted-foreground">{count} records</p>
+                            <button className="rounded-lg border border-border bg-card px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                               Preview
                             </button>
                           </div>
@@ -5913,16 +5902,16 @@ export default function VitalOsClient() {
                       ))}
                     </div>
                   </div>
-                  <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                    <p className="text-sm font-semibold text-slate-900">Care Team Activity</p>
+                  <div className="vital-card p-4">
+                    <p className="text-sm font-semibold text-foreground">Care Team Activity</p>
                     <div className="mt-3 grid gap-2 xl:grid-cols-2">
                       {activityFeed.slice(0, 6).map((item) => (
                         <div
                           key={`report-${item.id}`}
-                          className="rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2 text-xs text-slate-700"
+                          className="rounded-lg border border-border bg-muted/70 px-3 py-2 text-xs text-foreground"
                         >
                           <p>{item.text}</p>
-                          <p className="mt-1 text-[11px] text-slate-500">
+                          <p className="mt-1 text-[11px] text-muted-foreground">
                             {item.room} • {item.at}
                           </p>
                         </div>
@@ -5942,27 +5931,27 @@ export default function VitalOsClient() {
                       ["Pending labs", pendingLabsPatients.length],
                       ["Consult requested", consultRequestedPatients.length],
                     ].map(([label, value]) => (
-                      <div key={String(label)} className="rounded-xl border border-[#dce8f8] bg-white p-3 shadow-sm">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-                        <p className="mt-1 text-xl font-semibold text-slate-900">{value}</p>
+                      <div key={String(label)} className="vital-card p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                        <p className="mt-1 text-xl font-semibold text-foreground">{value}</p>
                       </div>
                     ))}
                   </div>
                   <div className="grid gap-3 xl:grid-cols-3">
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm xl:col-span-2">
-                      <p className="text-sm font-semibold text-slate-900">CTAS Acuity Distribution</p>
+                    <div className="vital-card p-4 xl:col-span-2">
+                      <p className="text-sm font-semibold text-foreground">CTAS Acuity Distribution</p>
                       <div className="mt-3 space-y-2">
                         {acuityDistribution.map((item) => {
                           const max = Math.max(...acuityDistribution.map((x) => x.value), 1);
                           return (
                             <div key={item.label}>
-                              <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
+                              <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
                                 <span>{item.label}</span>
                                 <span>{item.value}</span>
                               </div>
-                              <div className="h-2 rounded-full bg-slate-100">
+                              <div className="h-2 rounded-full bg-muted">
                                 <div
-                                  className="h-2 rounded-full bg-gradient-to-r from-blue-500 to-cyan-400"
+                                  className="h-2 rounded-full bg-primary"
                                   style={{ width: `${(item.value / max) * 100}%` }}
                                 />
                               </div>
@@ -5971,13 +5960,13 @@ export default function VitalOsClient() {
                         })}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">Patients by Unit</p>
+                    <div className="vital-card p-4">
+                      <p className="text-sm font-semibold text-foreground">Patients by Unit</p>
                       <div className="mt-4 flex items-center gap-4">
                         <div className="h-24 w-24 rounded-full" style={unitDonut} />
                         <div className="space-y-1">
                           {unitDistribution.map((item) => (
-                            <p key={item.label} className="text-xs text-slate-700">
+                            <p key={item.label} className="text-xs text-foreground">
                               {item.label}: <span className="font-semibold">{item.value}</span>
                             </p>
                           ))}
@@ -5986,29 +5975,29 @@ export default function VitalOsClient() {
                     </div>
                   </div>
                   <div className="grid gap-3 xl:grid-cols-2">
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">Top Concern Categories</p>
+                    <div className="vital-card p-4">
+                      <p className="text-sm font-semibold text-foreground">Top Concern Categories</p>
                       <div className="mt-3 space-y-2">
                         {topConcernCategories.map((item) => (
-                          <div key={item.label} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs">
-                            <span className="line-clamp-1 text-slate-700">{item.label}</span>
+                          <div key={item.label} className="flex items-center justify-between rounded-lg bg-muted px-3 py-2 text-xs">
+                            <span className="line-clamp-1 text-foreground">{item.label}</span>
                             <Badge variant="medications">{item.value}</Badge>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">Shift Triage Trend</p>
+                    <div className="vital-card p-4">
+                      <p className="text-sm font-semibold text-foreground">Shift Triage Trend</p>
                       <div className="mt-4 flex h-32 items-end gap-2">
                         {shiftTrend.map((item) => {
                           const max = Math.max(...shiftTrend.map((x) => x.value), 1);
                           return (
                             <div key={item.label} className="flex flex-1 flex-col items-center gap-1">
                               <div
-                                className="w-full rounded-t-md bg-gradient-to-t from-cyan-500 to-blue-500"
+                                className="w-full rounded-t-md bg-primary"
                                 style={{ height: `${Math.max(12, (item.value / max) * 96)}px` }}
                               />
-                              <span className="text-[10px] text-slate-500">{item.label}</span>
+                              <span className="text-[10px] text-muted-foreground">{item.label}</span>
                             </div>
                           );
                         })}
@@ -6016,23 +6005,23 @@ export default function VitalOsClient() {
                     </div>
                   </div>
                   <div className="grid gap-3 xl:grid-cols-2">
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">Risk Categories</p>
+                    <div className="vital-card p-4">
+                      <p className="text-sm font-semibold text-foreground">Risk Categories</p>
                       <div className="mt-3 space-y-2">
                         {riskDistribution.map((item) => (
-                          <div key={item.label} className="flex items-center justify-between rounded-lg bg-rose-50/60 px-3 py-2 text-xs">
-                            <span className="line-clamp-1 text-slate-700">{item.label}</span>
+                          <div key={item.label} className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-xs">
+                            <span className="line-clamp-1 text-foreground">{item.label}</span>
                             <Badge variant="risk">{item.value}</Badge>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <div className="rounded-xl border border-[#dce8f8] bg-white p-4 shadow-sm">
-                      <p className="text-sm font-semibold text-slate-900">Age Distribution</p>
+                    <div className="vital-card p-4">
+                      <p className="text-sm font-semibold text-foreground">Age Distribution</p>
                       <div className="mt-3 space-y-2">
                         {ageDistribution.map((item) => (
-                          <div key={item.label} className="flex items-center justify-between rounded-lg bg-cyan-50/60 px-3 py-2 text-xs">
-                            <span className="text-slate-700">{item.label}</span>
+                          <div key={item.label} className="flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-xs">
+                            <span className="text-foreground">{item.label}</span>
                             <Badge variant="notes">{item.value}</Badge>
                           </div>
                         ))}
@@ -6042,46 +6031,48 @@ export default function VitalOsClient() {
                 </div>
               )}
               {activePage === "settings" && (
-                <div className="rounded-xl border border-[#e3edf9] bg-white p-4 shadow-sm">
-                  <p className="text-sm font-semibold text-slate-900">Settings</p>
-                  <div className="mt-3 grid gap-2 text-sm">
-                    <p>Microphone: {supportsSpeech ? "Available" : "Unavailable"}</p>
-                    <p>Voice mode: {voiceSessionLive ? "Live" : "Idle"}</p>
-                    <p>Theme: Light (dark mode ready)</p>
-                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                      Demo environment. Mock patient data only.
-                    </p>
-                    <div className="mt-2 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={handleClear}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5"
-                      >
-                        Clear Session
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void refreshPatients()}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5"
-                      >
-                        Reload Patient Store
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSignOut}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5"
-                      >
-                        Sign Out
-                      </button>
+                <div className="grid gap-3">
+                  <div className="vital-card p-4">
+                    <p className="text-sm font-semibold text-foreground">Settings</p>
+                    <div className="mt-3 grid gap-2 text-sm text-foreground">
+                      <p>Microphone: {supportsSpeech ? "Available" : "Unavailable"}</p>
+                      <p>Voice mode: {voiceSessionLive ? "Live" : "Idle"}</p>
+                      <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
+                        Demo environment. Mock patient data only.
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={handleClear}
+                          className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted"
+                        >
+                          Clear Session
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void refreshPatients()}
+                          className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted"
+                        >
+                          Reload Patient Store
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSignOut}
+                          className="rounded-lg border border-border bg-card px-3 py-1.5 hover:bg-muted"
+                        >
+                          Sign Out
+                        </button>
+                      </div>
                     </div>
                   </div>
+                  <ThemeAppearanceControl />
                 </div>
               )}
             </div>
           ) : (
             <>
           {openPatientTabIds.length > 1 && (
-            <motion.div layout className="panel mb-3 rounded-xl border border-[#e3edf9] bg-white px-3 py-2 shadow-sm">
+            <motion.div layout className="vital-card mb-3 px-3 py-2">
               <motion.div layout className="flex flex-wrap items-center gap-2">
                 {openPatientTabIds.map((id) => {
                   const p = patients.find((item) => item.id === id);
@@ -6094,17 +6085,17 @@ export default function VitalOsClient() {
                       type="button"
                       onClick={() => setSelectedPatientId(id)}
                       className={cn(
-                        "group inline-flex items-center gap-2 rounded-full border bg-[#07182f] px-3 py-1 text-xs text-slate-100 transition-colors",
+                        "group inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1 text-xs text-foreground transition-colors",
                         active
-                          ? "border-clinical-teal/70 ring-clinical"
-                          : "border-white/15 hover:border-slate-400/50"
+                          ? "border-primary bg-primary/10 text-primary ring-clinical"
+                          : "hover:border-border hover:bg-muted"
                       )}
                     >
                       <span className="font-medium">{p.name}</span>
                       <PatientClinicalIndicator patient={p} />
-                      <span className="mono text-[10px] text-slate-300">{p.mrn}</span>
+                      <span className="mono text-[10px] text-muted-foreground">{p.mrn}</span>
                       <span
-                        className="rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-white/10"
+                        className="rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted"
                         onClick={(e) => {
                           e.stopPropagation();
                           setOpenPatientTabIds((prev) => prev.filter((tab) => tab !== id));
@@ -6126,69 +6117,69 @@ export default function VitalOsClient() {
           )}
 
           {activePatient && hasRequestedSections && (
-            <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-2 text-sm font-medium text-slate-700">
+            <div className="mb-3 vital-section px-3 py-2 text-sm font-medium text-foreground">
               Active Chart: {activePatient.name} • {activePatient.mrn} • Room {activePatient.room}
             </div>
           )}
 
           {activePatient && (
-            <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl border border-[#e3edf9] bg-white p-3 shadow-sm lg:grid-cols-7">
+            <div className="mb-3 grid grid-cols-2 gap-2 vital-card p-3 lg:grid-cols-7">
               <div>
-                <p className="text-[11px] uppercase text-slate-600">Patient</p>
-                <p className="text-sm font-semibold text-slate-900">{activePatient.name}</p>
+                <p className="text-[11px] uppercase text-muted-foreground">Patient</p>
+                <p className="text-sm font-semibold text-foreground">{activePatient.name}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase text-slate-600">MRN</p>
-                <p className="text-sm font-semibold text-slate-900">{activePatient.mrn}</p>
+                <p className="text-[11px] uppercase text-muted-foreground">MRN</p>
+                <p className="text-sm font-semibold text-foreground">{activePatient.mrn}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase text-slate-600">Age/Sex</p>
-                <p className="text-sm font-semibold text-slate-900">
+                <p className="text-[11px] uppercase text-muted-foreground">Age/Sex</p>
+                <p className="text-sm font-semibold text-foreground">
                   {activePatient.age}
                   {activePatient.sex}
                 </p>
               </div>
               <div>
-                <p className="text-[11px] uppercase text-slate-600">DOB</p>
-                <p className="text-sm font-semibold text-slate-900">{activePatient.dob}</p>
+                <p className="text-[11px] uppercase text-muted-foreground">DOB</p>
+                <p className="text-sm font-semibold text-foreground">{activePatient.dob}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase text-slate-600">Blood</p>
-                <p className="text-sm font-semibold text-slate-900">{activePatient.bloodType || "—"}</p>
+                <p className="text-[11px] uppercase text-muted-foreground">Blood</p>
+                <p className="text-sm font-semibold text-foreground">{activePatient.bloodType || "—"}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase text-slate-600">Provider</p>
-                <p className="text-sm font-semibold text-slate-900">{activePatient.pcp ?? "Unassigned"}</p>
+                <p className="text-[11px] uppercase text-muted-foreground">Provider</p>
+                <p className="text-sm font-semibold text-foreground">{activePatient.pcp ?? "Unassigned"}</p>
               </div>
               <div>
-                <p className="text-[11px] uppercase text-slate-600">Last Visit</p>
-                <p className="text-sm font-semibold text-slate-900">{activePatient.lastVisit}</p>
+                <p className="text-[11px] uppercase text-muted-foreground">Last Visit</p>
+                <p className="text-sm font-semibold text-foreground">{activePatient.lastVisit}</p>
               </div>
             </div>
           )}
 
           {!activePatient && !hasRequestedSections && (
-            <div className="mb-3 rounded-xl border border-dashed border-[#cfe0f5] bg-[#f8fbff] px-4 py-8 text-center text-sm text-slate-600">
-              <div className="mb-2 inline-flex rounded-2xl border border-[#dbe8f9] bg-white px-3 py-2">
-                <VitalLogo size={34} variant="full" textClassName="text-slate-800" />
+            <div className="mb-3 rounded-lg border border-dashed border-border bg-muted px-4 py-8 text-center text-sm text-muted-foreground">
+              <div className="mb-2 inline-flex rounded-lg border border-border bg-card px-3 py-2">
+                <VitalLogo size={34} variant="full" textClassName="text-sidebar-foreground" />
               </div>
-              <p className="font-medium text-slate-700">Awaiting clinician request</p>
-              <p className="mt-1 text-slate-500">No chart section currently opened</p>
+              <p className="font-medium text-foreground">Awaiting clinician request</p>
+              <p className="mt-1 text-muted-foreground">No chart section currently opened</p>
             </div>
           )}
 
           {activePatient && hasRequestedSections && (
           <div className="grid flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
             {activePatient && showSection("allergies") && (
-            <div className="rounded-xl border border-[#e3edf9] border-l-4 border-l-rose-300 bg-rose-50/30 p-3 shadow-sm">
+            <div className="vital-card border-l-4 border-l-rose-400 p-3">
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-900">Allergies</p>
+                <p className="text-sm font-semibold text-foreground">Allergies</p>
                 <Badge variant="allergies" className="text-xs">
                   {activeAllergies.length ? `${activeAllergies.length} total` : "None listed"}
                 </Badge>
               </div>
-              <div className="rounded-xl border border-slate-100">
-                <div className="grid grid-cols-[1.5fr_1fr_1fr] border-b border-slate-100 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
+              <div className="rounded-xl border border-border">
+                <div className="grid grid-cols-[1.5fr_1fr_1fr] border-b border-border bg-muted px-2 py-1 text-[11px] font-semibold text-foreground">
                   <span>Allergen</span>
                   <span>Reaction</span>
                   <span>Severity</span>
@@ -6203,11 +6194,11 @@ export default function VitalOsClient() {
                   return (
                     <div
                       key={`all-${i}`}
-                      className="grid grid-cols-[1.5fr_1fr_1fr] border-b border-slate-100 px-2 py-1.5 text-sm last:border-b-0"
+                      className="grid grid-cols-[1.5fr_1fr_1fr] border-b border-border px-2 py-1.5 text-sm last:border-b-0"
                     >
-                      <span className="font-medium text-slate-800">{namePart || a}</span>
-                      <span className="text-slate-900">{reactionPart || "Noted"}</span>
-                      <span className="text-slate-900">{severity}</span>
+                      <span className="font-medium text-foreground">{namePart || a}</span>
+                      <span className="text-foreground">{reactionPart || "Noted"}</span>
+                      <span className="text-foreground">{severity}</span>
                     </div>
                   );
                 })}
@@ -6216,15 +6207,15 @@ export default function VitalOsClient() {
             )}
 
             {activePatient && showSection("medications") && (
-            <div className="rounded-xl border border-[#e3edf9] border-l-4 border-l-blue-300 bg-blue-50/20 p-3 shadow-sm">
+            <div className="vital-card border-l-4 border-l-sky-500 p-3">
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-900">Medications</p>
+                <p className="text-sm font-semibold text-foreground">Medications</p>
                 <Badge variant="medications" className="text-xs">
                   {activeMeds.length ? `${activeMeds.length} active` : "None listed"}
                 </Badge>
               </div>
-              <div className="rounded-xl border border-slate-100">
-                <div className="grid grid-cols-[1.6fr_1.2fr_1fr] border-b border-slate-100 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
+              <div className="rounded-xl border border-border">
+                <div className="grid grid-cols-[1.6fr_1.2fr_1fr] border-b border-border bg-muted px-2 py-1 text-[11px] font-semibold text-foreground">
                   <span>Medication</span>
                   <span>Dose / Frequency</span>
                   <span>Indication</span>
@@ -6232,11 +6223,11 @@ export default function VitalOsClient() {
                 {activeMeds.slice(0, 5).map((m, i) => (
                   <div
                     key={`med-${i}`}
-                    className="grid grid-cols-[1.6fr_1.2fr_1fr] border-b border-slate-100 px-2 py-1.5 text-sm last:border-b-0"
+                    className="grid grid-cols-[1.6fr_1.2fr_1fr] border-b border-border px-2 py-1.5 text-sm last:border-b-0"
                   >
-                    <span className="font-medium text-slate-800">{m.name}</span>
-                    <span className="text-slate-900">{m.sig}</span>
-                    <span className="text-slate-900">Active</span>
+                    <span className="font-medium text-foreground">{m.name}</span>
+                    <span className="text-foreground">{m.sig}</span>
+                    <span className="text-foreground">Active</span>
                   </div>
                 ))}
               </div>
@@ -6244,15 +6235,15 @@ export default function VitalOsClient() {
             )}
 
             {activePatient && showSection("diagnoses") && (
-            <div className="rounded-xl border border-[#e3edf9] border-l-4 border-l-amber-300 bg-amber-50/20 p-3 shadow-sm">
+            <div className="vital-card border-l-4 border-l-amber-400 p-3">
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-900">Problems</p>
+                <p className="text-sm font-semibold text-foreground">Problems</p>
                 <Badge variant="problems" className="text-xs">
                   {activeProblems.length ? `${activeProblemCount} active` : "None listed"}
                 </Badge>
               </div>
-              <div className="rounded-xl border border-slate-100">
-                <div className="grid grid-cols-[2fr_1fr_1fr] border-b border-slate-100 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
+              <div className="rounded-xl border border-border">
+                <div className="grid grid-cols-[2fr_1fr_1fr] border-b border-border bg-muted px-2 py-1 text-[11px] font-semibold text-foreground">
                   <span>Problem</span>
                   <span>Status</span>
                   <span>Since</span>
@@ -6265,9 +6256,9 @@ export default function VitalOsClient() {
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -4 }}
                       transition={{ duration: 0.2 }}
-                      className="grid grid-cols-[2fr_1fr_1fr] border-b border-slate-100 px-2 py-1.5 text-sm last:border-b-0"
+                      className="grid grid-cols-[2fr_1fr_1fr] border-b border-border px-2 py-1.5 text-sm last:border-b-0"
                     >
-                      <span className="font-medium text-slate-900">{name}</span>
+                      <span className="font-medium text-foreground">{name}</span>
                       <motion.div className="flex flex-wrap items-center gap-1">
                         {permissions.canEditPatientStatus ? (
                           <select
@@ -6293,7 +6284,7 @@ export default function VitalOsClient() {
                                 if (ok) void refreshPatients();
                               });
                             }}
-                            className="h-7 rounded-md border border-slate-200 bg-white px-1 text-[10px] text-slate-900"
+                            className="h-7 rounded-md border border-border bg-card px-1 text-[10px] text-foreground"
                           >
                             {PROBLEM_STATUS_OPTIONS.map((option) => (
                               <option key={option} value={option}>
@@ -6302,7 +6293,7 @@ export default function VitalOsClient() {
                             ))}
                           </select>
                         ) : (
-                          <span className="text-xs font-medium text-slate-800">{status}</span>
+                          <span className="text-xs font-medium text-foreground">{status}</span>
                         )}
                         <Badge
                           variant={problemStatusBadgeVariant(status)}
@@ -6323,7 +6314,7 @@ export default function VitalOsClient() {
                           )}
                         </AnimatePresence>
                       </motion.div>
-                      <span className="text-slate-900">{since}</span>
+                      <span className="text-foreground">{since}</span>
                     </motion.div>
                   ))}
                 </AnimatePresence>
@@ -6332,21 +6323,21 @@ export default function VitalOsClient() {
             )}
 
             {activePatient && (showSection("vitals") || showSection("labs")) && (
-            <motion.div className="rounded-xl border border-[#e3edf9] border-l-4 border-l-teal-300 bg-teal-50/20 p-3 shadow-sm">
+            <motion.div className="vital-card border-l-4 border-l-emerald-500 p-3">
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-900">Recent Notes / Vitals</p>
+                <p className="text-sm font-semibold text-foreground">Recent Notes / Vitals</p>
                 <Badge variant="notes" className="text-xs">
                   {activeVitals.length ? "Live" : "None listed"}
                 </Badge>
               </div>
               <div className="grid grid-cols-2 gap-1 text-sm">
                 {activeVitals.slice(0, 6).map(([k, v]) => (
-                  <div key={k} className="rounded-lg bg-slate-50 px-2 py-1.5">
-                    <span className="mr-1 text-slate-600">{k}</span>
-                    <span className="font-medium text-slate-900">{v}</span>
+                  <div key={k} className="rounded-lg bg-muted px-2 py-1.5">
+                    <span className="mr-1 text-muted-foreground">{k}</span>
+                    <span className="font-medium text-foreground">{v}</span>
                   </div>
                 ))}
-                <motion.div className="col-span-2 rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-700">
+                <motion.div className="col-span-2 rounded-lg bg-muted px-2 py-1.5 text-xs text-foreground">
                   {activePatient?.chartNote || "No recent notes"}
                 </motion.div>
               </div>
@@ -6357,22 +6348,22 @@ export default function VitalOsClient() {
 
           {activePatient && (showSection("plan") || showSection("history")) && (
           <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className="rounded-xl border border-[#e3edf9] border-l-4 border-l-cyan-300 bg-cyan-50/20 px-3 py-2 shadow-sm">
-              <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+            <div className="vital-card border-l-4 border-l-sky-500 px-3 py-2">
+              <p className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
                 <Phone className="h-4 w-4 text-blue-500" />
                 Emergency Contact
               </p>
-              <p className="mt-1 text-sm text-slate-900">
+              <p className="mt-1 text-sm text-foreground">
                 {activePatient.emergencyContact?.name || "Not listed"} (
                 {activePatient.emergencyContact?.relationship || "Not listed"})
               </p>
             </div>
-            <div className="rounded-xl border border-[#e3edf9] border-l-4 border-l-amber-300 bg-amber-50/20 px-3 py-2 shadow-sm">
-              <p className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+            <div className="vital-card border-l-4 border-l-amber-400 px-3 py-2">
+              <p className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
                 <Phone className="h-4 w-4 text-blue-500" />
                 {activePatient.emergencyContact?.phone || "Not listed"}
               </p>
-              <p className="mt-1 text-xs text-slate-500">Primary contact line</p>
+              <p className="mt-1 text-xs text-muted-foreground">Primary contact line</p>
             </div>
           </div>
           )}
@@ -6386,12 +6377,12 @@ export default function VitalOsClient() {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
-                    className="rounded-2xl border border-[#dbe7fb] bg-white p-4 shadow-sm"
+                    className="vital-card p-4"
                   >
-                    <div className="mb-3 h-5 w-48 animate-pulse rounded bg-slate-200" />
+                    <div className="mb-3 h-5 w-48 animate-pulse rounded bg-muted" />
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       {Array.from({ length: 4 }).map((_, i) => (
-                        <div key={i} className="h-16 animate-pulse rounded-xl bg-slate-100" />
+                        <div key={i} className="h-16 animate-pulse rounded-xl bg-muted" />
                       ))}
                     </div>
                   </motion.div>
@@ -6421,11 +6412,11 @@ export default function VitalOsClient() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.4 }}
-                className="mt-3 rounded-xl border border-cyan-200/60 bg-gradient-to-br from-[#0b2a55] via-[#10386c] to-[#0f4b78] p-3 text-white shadow-md"
+                className="mt-3 vital-card border-l-4 border-l-sky-600 p-3"
               >
               <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold">Live Medication Orders</p>
-                <Badge variant="notes" className="bg-cyan-100 text-[#0b2a55]">
+                <p className="text-sm font-semibold text-foreground">Live Medication Orders</p>
+                <Badge variant="notes">
                   {pendingOrders.filter((o) => o.status !== "Delivered").length} active
                 </Badge>
               </div>
@@ -6436,13 +6427,12 @@ export default function VitalOsClient() {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={cn(
-                      "rounded-lg border border-cyan-200/35 bg-white/10 px-3 py-2 backdrop-blur-sm",
-                      order.status !== "Delivered" && "animate-pulse",
-                      order.status === "Delivered" && "border-emerald-300/70 bg-emerald-400/15"
+                      "rounded-lg border border-border bg-muted px-3 py-2",
+                      order.status === "Delivered" && "border-emerald-200 bg-emerald-50"
                     )}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">
+                      <p className="text-sm font-medium text-foreground">
                         {order.medication} for {order.patientName}
                       </p>
                       <Badge
@@ -6463,19 +6453,19 @@ export default function VitalOsClient() {
                         {order.status}
                       </Badge>
                     </div>
-                    <p className="mt-1 text-xs text-white/80">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {order.room} •{" "}
                       {new Date(order.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
                     </p>
-                    <p className="mt-1 text-xs text-cyan-100">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {order.nurseName} • {order.pharmacyStation}
                     </p>
-                    <div className="mt-2 h-1.5 rounded-full bg-white/20">
+                    <div className="mt-2 h-1.5 rounded-full bg-muted">
                       <motion.div
-                        className="h-1.5 rounded-full bg-gradient-to-r from-cyan-300 via-blue-300 to-emerald-300"
+                        className="h-1.5 rounded-full bg-primary"
                         initial={{ width: 0 }}
                         animate={{
                           width: `${((order.stepIndex + 1) / ORDER_WORKFLOW_STEPS.length) * 100}%`,
@@ -6483,7 +6473,7 @@ export default function VitalOsClient() {
                         transition={{ duration: 0.5, ease: "easeOut" }}
                       />
                     </div>
-                    <p className="mt-1 text-[10px] text-cyan-100/90">
+                    <p className="mt-1 text-[10px] text-muted-foreground">
                       Queued → Pharmacy → Nurse → Patient
                     </p>
                   </motion.div>
@@ -6497,32 +6487,32 @@ export default function VitalOsClient() {
           )}
         </section>
 
-        <aside className="hidden border-l border-[#e3edf9] bg-[#f8fbff] p-4 lg:block">
+        <aside className="hidden border-l border-border bg-card p-4 lg:block">
           <div className="mb-3 flex items-center justify-between">
-            <p className="text-sm font-semibold text-slate-900">Patient Details</p>
+            <p className="text-sm font-semibold text-foreground">Patient Details</p>
             <Badge variant="notes" className="text-[10px]">
               {activePage === "dashboard" ? "Live" : "Info"}
             </Badge>
           </div>
           {activePage !== "dashboard" ? (
-            <div className="rounded-xl border border-[#e3edf9] bg-white p-3 text-sm text-slate-600 shadow-sm">
-              Select <span className="font-medium text-slate-900">Dashboard</span> to view active
+            <div className="vital-card p-3 text-sm text-muted-foreground">
+              Select <span className="font-medium text-foreground">Dashboard</span> to view active
               patient details and chart navigation.
             </div>
           ) : !activePatient ? (
-            <div className="rounded-xl border border-dashed border-[#d6e4f8] bg-white p-4 text-sm text-slate-500 shadow-sm">
+            <div className="vital-card border-dashed p-4 text-sm text-muted-foreground">
               No active patient chart.
             </div>
           ) : (
           <div className="space-y-2">
             {[
-              ["Allergies", `${activeAllergies.length || 0} total`, "allergies", "border-l-rose-300"],
-              ["Medications", `${activeMeds.length || 0} active`, "medications", "border-l-blue-300"],
-              ["Problems", `${activeProblems.length || 0} active`, "diagnoses", "border-l-amber-300"],
-              ["Recent Notes", activePatient?.chartNote ? "1 recent" : "None listed", "vitals", "border-l-indigo-300"],
-              ["Emergency Contact", activePatient?.emergencyContact?.name ? "1 contact" : "None listed", "plan", "border-l-cyan-300"],
-              ["Care Team", `${activePatient?.careTeam?.length ?? 0} listed`, "plan", "border-l-teal-300"],
-              ["Risk Flags", activePatient?.riskFlags ? "1 flag" : "None listed", "plan", "border-l-amber-400"],
+              ["Allergies", `${activeAllergies.length || 0} total`, "allergies", "border-l-rose-400"],
+              ["Medications", `${activeMeds.length || 0} active`, "medications", "border-l-sky-500"],
+              ["Problems", `${activeProblems.length || 0} active`, "diagnoses", "border-l-amber-400"],
+              ["Recent Notes", activePatient?.chartNote ? "1 recent" : "None listed", "vitals", "border-l-slate-400"],
+              ["Emergency Contact", activePatient?.emergencyContact?.name ? "1 contact" : "None listed", "plan", "border-l-sky-400"],
+              ["Care Team", `${activePatient?.careTeam?.length ?? 0} listed`, "plan", "border-l-emerald-500"],
+              ["Risk Flags", activePatient?.riskFlags ? "1 flag" : "None listed", "plan", "border-l-amber-500"],
             ].map(([label, value, key, accent]) => (
               <button
                 type="button"
@@ -6543,12 +6533,12 @@ export default function VitalOsClient() {
                   });
                 }}
                 className={cn(
-                  "w-full rounded-xl border border-[#e3edf9] border-l-4 bg-white p-3 text-left shadow-sm",
+                  "w-full vital-card-hover border-l-4 p-3 text-left",
                   accent as string
                 )}
               >
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-900">{label}</p>
+                  <p className="text-sm font-semibold text-foreground">{label}</p>
                   <div className="inline-flex items-center gap-2">
                     <Badge
                       variant={
@@ -6566,21 +6556,21 @@ export default function VitalOsClient() {
                     >
                       {value}
                     </Badge>
-                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </div>
                 </div>
-                <p className="mt-1 text-xs text-slate-600">- Tap to open section in workspace</p>
+                <p className="mt-1 text-xs text-muted-foreground">- Tap to open section in workspace</p>
               </button>
             ))}
-            <div className="rounded-xl border border-[#e3edf9] bg-white p-3 shadow-sm">
-              <p className="text-sm font-semibold text-slate-900">Notes</p>
-              <p className="mt-1 text-sm text-slate-700">
+            <div className="vital-card p-3">
+              <p className="text-sm font-semibold text-foreground">Notes</p>
+              <p className="mt-1 text-sm text-foreground">
                 {activePatient?.chartNote || "No notes yet"}
               </p>
             </div>
-            <div className="rounded-xl border border-[#e3edf9] bg-white p-3 shadow-sm">
-              <p className="text-sm font-semibold text-slate-900">Emergency Contact</p>
-              <p className="mt-2 inline-flex items-center gap-2 text-sm text-slate-700">
+            <div className="vital-card p-3">
+              <p className="text-sm font-semibold text-foreground">Emergency Contact</p>
+              <p className="mt-2 inline-flex items-center gap-2 text-sm text-foreground">
                 <Phone className="h-4 w-4 text-blue-500" />
                 {activePatient?.social?.includes("daughter")
                   ? "(555) 123-4567"
@@ -6656,8 +6646,8 @@ function CompactStatusPill({
     error: "Error",
   };
   return (
-    <span className="inline-flex max-w-[220px] flex-wrap items-center justify-end gap-1.5 text-[10px] font-medium text-slate-700">
-      <span className="flex items-center gap-1 rounded-full border border-slate-300/90 bg-white/95 px-2 py-0.5 text-slate-900 transition-colors hover:bg-slate-100">
+    <span className="inline-flex max-w-[220px] flex-wrap items-center justify-end gap-1.5 text-[10px] font-medium text-foreground">
+      <span className="flex items-center gap-1 rounded-full border border-border/90 bg-card px-2 py-0.5 text-foreground transition-colors hover:bg-muted">
         {systemState === "idle" && <VitalLogo size={11} variant="icon" />}
         {systemState === "listening" && (
           <span className="animate-pulse">
@@ -6736,7 +6726,7 @@ function LiveTranscriptBlock({
             <span className="font-bold text-neutral-950">{emphasis}</span>
           )}
           {listening && (
-            <span className="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500 align-middle" />
+            <span className="ml-1 inline-block h-2 w-2 animate-pulse rounded-full bg-primary align-middle" />
           )}
         </p>
       )}
@@ -6759,39 +6749,37 @@ function RequestedPatientCard({
   const onlySection = !wantsOverview && view.fields.length === 1 ? view.fields[0] : null;
 
   return (
-    <div className="mt-2 overflow-hidden rounded-2xl border border-[#d8e6fb] bg-white shadow-md">
-      <div className="flex items-center justify-between gap-2 bg-[#0B2A55] px-4 py-2.5">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white/90">
+    <div className="mt-2 overflow-hidden vital-card">
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-4 py-2.5">
+        <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
           Requested chart data
         </p>
-        <span className="rounded-full border border-cyan-200/60 bg-cyan-100 px-2 py-0.5 text-[10px] font-semibold text-[#0B2A55]">
-          {view.title}
-        </span>
+        <Badge variant="clinical">{view.title}</Badge>
       </div>
       <div className="p-4">
 
       {(wantsOverview || !onlySection) && (
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-        <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-2.5 shadow-sm">
-          <p className="text-[10px] uppercase text-neutral-500">Age/Sex</p>
-          <p className="text-sm font-semibold text-neutral-900">
+        <div className="vital-section p-2.5">
+          <p className="text-[10px] uppercase text-muted-foreground">Age/Sex</p>
+          <p className="text-sm font-medium text-foreground">
             {p.age}
             {p.sex}
           </p>
         </div>
-        <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-2.5 shadow-sm">
-          <p className="text-[10px] uppercase text-neutral-500">MRN</p>
-          <p className="text-sm font-semibold text-neutral-900">{p.mrn}</p>
+        <div className="vital-section p-2.5">
+          <p className="text-[10px] uppercase text-muted-foreground">MRN</p>
+          <p className="text-sm font-medium text-foreground">{p.mrn}</p>
         </div>
-        <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-2.5 shadow-sm">
-          <p className="text-[10px] uppercase text-neutral-500">Problems</p>
-          <p className="text-sm font-semibold text-neutral-900">
+        <div className="vital-section p-2.5">
+          <p className="text-[10px] uppercase text-muted-foreground">Problems</p>
+          <p className="text-sm font-medium text-foreground">
             {p.diagnoses.length}
           </p>
         </div>
-        <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-2.5 shadow-sm">
-          <p className="text-[10px] uppercase text-neutral-500">Meds</p>
-          <p className="text-sm font-semibold text-neutral-900">
+        <div className="vital-section p-2.5">
+          <p className="text-[10px] uppercase text-muted-foreground">Meds</p>
+          <p className="text-sm font-medium text-foreground">
             {p.medications.length}
           </p>
         </div>
@@ -6800,30 +6788,30 @@ function RequestedPatientCard({
 
       {view.fields.includes("demographics") && !wantsOverview && (
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <div className="rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2">
-            <p className="text-[10px] uppercase text-neutral-500">DOB</p>
-            <p className="text-sm font-semibold text-neutral-900">{p.dob}</p>
+          <div className="vital-section px-2.5 py-2">
+            <p className="text-[10px] uppercase text-muted-foreground">DOB</p>
+            <p className="text-sm font-medium text-foreground">{p.dob}</p>
           </div>
-          <div className="rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2">
-            <p className="text-[10px] uppercase text-neutral-500">Room</p>
-            <p className="text-sm font-semibold text-neutral-900">{p.room}</p>
+          <div className="vital-section px-2.5 py-2">
+            <p className="text-[10px] uppercase text-muted-foreground">Room</p>
+            <p className="text-sm font-medium text-foreground">{p.room}</p>
           </div>
-          <div className="rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2">
-            <p className="text-[10px] uppercase text-neutral-500">Blood type</p>
+          <div className="vital-section px-2.5 py-2">
+            <p className="text-[10px] uppercase text-muted-foreground">Blood type</p>
             <p className="text-sm font-semibold text-neutral-900">{p.bloodType}</p>
           </div>
-          <div className="rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2">
-            <p className="text-[10px] uppercase text-neutral-500">Acuity</p>
-            <p className="text-sm font-semibold text-neutral-900">{p.triageAcuity}</p>
+          <div className="vital-section px-2.5 py-2">
+            <p className="text-[10px] uppercase text-muted-foreground">Acuity</p>
+            <p className="text-sm font-medium text-foreground">{p.triageAcuity}</p>
           </div>
-          <div className="col-span-2 rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2 sm:col-span-3">
-            <p className="text-[10px] uppercase text-neutral-500">Chief concern</p>
-            <p className="text-sm font-semibold text-neutral-900">{p.chiefConcern}</p>
+          <div className="col-span-2 vital-section px-2.5 py-2 sm:col-span-3">
+            <p className="text-[10px] uppercase text-muted-foreground">Chief concern</p>
+            <p className="text-sm font-medium text-foreground">{p.chiefConcern}</p>
           </div>
           {p.symptoms && p.symptoms.length > 0 && (
-            <div className="col-span-2 rounded-lg border border-violet-100 bg-violet-50/60 px-2.5 py-2 sm:col-span-3">
-              <p className="text-[10px] uppercase text-neutral-500">Symptoms</p>
-              <p className="text-sm text-neutral-800">{p.symptoms.join(", ")}</p>
+            <div className="col-span-2 vital-section px-2.5 py-2 sm:col-span-3">
+              <p className="text-[10px] uppercase text-muted-foreground">Symptoms</p>
+              <p className="text-sm text-foreground">{p.symptoms.join(", ")}</p>
             </div>
           )}
         </div>
@@ -6838,7 +6826,7 @@ function RequestedPatientCard({
             {vitals.map(([k, v]) => (
               <div
                 key={`${view.patientId}-v-${k}`}
-                className="rounded-lg border border-cyan-100 bg-cyan-50/60 px-2.5 py-2"
+                className="rounded-lg border border-border bg-muted/60 px-2.5 py-2"
               >
                 <p className="text-[10px] uppercase text-neutral-500">{k}</p>
                 <p className="text-sm font-semibold text-neutral-900">{v}</p>
@@ -6857,7 +6845,7 @@ function RequestedPatientCard({
             {meds.map((m, idx) => (
               <p
                 key={`${view.patientId}-m-${idx}`}
-                className="rounded-lg border border-cyan-100 bg-cyan-50/60 px-2.5 py-1.5 text-sm text-neutral-700"
+                className="rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-sm text-foreground"
               >
                 {m.name} - {m.sig}
               </p>
@@ -6875,7 +6863,7 @@ function RequestedPatientCard({
             {problems.map((problem) => (
               <div
                 key={problem.id}
-                className="flex items-center justify-between rounded-lg border border-amber-100 bg-amber-50/60 px-2.5 py-1.5 text-sm"
+                className="flex items-center justify-between rounded-lg border border-amber-200/80 bg-amber-50/60 px-2.5 py-1.5 text-sm dark:border-amber-800/50 dark:bg-amber-950/30"
               >
                 <span className="text-neutral-800">{problem.name}</span>
                 <Badge
@@ -7006,7 +6994,7 @@ function WorkspaceOverlay({
   ];
 
   const sheetSurface =
-    "[&_.panel]:border-neutral-200/90 [&_.panel]:bg-white/95 [&_.panel]:shadow-sm [&_.panel-header]:border-neutral-200/80 [&_.mono]:text-neutral-600 [&_.text-muted-foreground]:text-neutral-500";
+    "[&_.panel]:border-neutral-200/90 [&_.panel]:bg-card [&_.panel]:shadow-sm [&_.panel-header]:border-neutral-200/80 [&_.mono]:text-neutral-600 [&_.text-muted-foreground]:text-neutral-500";
 
   return (
     <motion.div
@@ -7039,7 +7027,7 @@ function WorkspaceOverlay({
                   "shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors",
                   tab === t.id
                     ? "bg-neutral-900 text-[#F2F2EB]"
-                    : "bg-white text-neutral-600 shadow-sm ring-1 ring-neutral-200/80 hover:bg-neutral-50"
+                    : "bg-card text-neutral-600 shadow-sm ring-1 ring-neutral-200/80 hover:bg-neutral-50"
                 )}
               >
                 {t.label}
@@ -7049,7 +7037,7 @@ function WorkspaceOverlay({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-card text-neutral-700 hover:bg-neutral-50"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -7078,7 +7066,7 @@ function WorkspaceOverlay({
                 <motion.div
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="rounded-xl border border-amber-300/60 bg-amber-50/90 px-3 py-2 text-sm text-amber-950 shadow-sm"
+                  className="rounded-xl border border-amber-300/60 bg-amber-50/90 px-3 py-2 text-sm text-amber-950 shadow-sm dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-100"
                 >
                   Pending order: {pendingMedicationOrder.medication} for{" "}
                   {pendingMedicationOrder.patientName}. Say &quot;yes&quot; to
@@ -7154,8 +7142,7 @@ function ActionBar({
         onClick={onEmergency}
         disabled={disabled}
         className={cn(
-          emergencyArmed &&
-            "shadow-[0_0_0_1px_hsl(var(--clinical-danger)/0.5),0_8px_30px_-10px_hsl(var(--clinical-danger)/0.7)]"
+          emergencyArmed && "ring-2 ring-rose-300"
         )}
       >
         <Siren className="h-4 w-4" />
@@ -7215,7 +7202,7 @@ function ClinicalReasoningPanel({
         {reasoning.possibleDiagnoses.map((dx, idx) => (
           <div
             key={`${dx.diagnosis}-${idx}`}
-            className="rounded-lg border border-border/70 bg-black/10 px-3 py-2"
+            className="rounded-lg border border-border bg-muted px-3 py-2"
           >
             <motion.div
               initial={{ opacity: 0 }}
@@ -7722,7 +7709,7 @@ function PatientPanel({
             "  - ",
             "Vitals: BP — / HR — / SpO2 — / T —",
           ].join("\n")}
-          className="scrollbar-thin mono min-h-[180px] w-full resize-y rounded-2xl border border-white/10 bg-black/25 p-3 text-[12.5px] leading-relaxed text-foreground/90 placeholder:text-muted-foreground/45 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-clinical-teal/40"
+          className="scrollbar-thin min-h-[180px] w-full resize-y rounded-lg border border-border bg-card p-3 text-[12.5px] leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/30"
         />
         <p className="mono mt-2 px-1 text-[10px] leading-relaxed text-muted-foreground/80">
           Selecting a chart fills this from the local roster file (

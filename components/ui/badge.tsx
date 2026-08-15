@@ -3,31 +3,42 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-[0.01em] transition-all duration-200 mono",
+  "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium leading-none tracking-normal transition-colors",
   {
     variants: {
       variant: {
         default:
-          "border-slate-300/80 bg-slate-100 text-slate-800 hover:bg-slate-200/90",
+          "border-border bg-muted text-foreground",
         clinical:
-          "border-clinical-teal/55 bg-clinical-teal/20 text-slate-900 shadow-[0_0_18px_-6px_hsl(var(--clinical-teal)/0.45)] hover:bg-clinical-teal/28",
+          "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-800/60 dark:bg-sky-950/40 dark:text-sky-200",
         cyan:
-          "border-clinical-cyan/55 bg-clinical-cyan/18 text-slate-900 shadow-[0_0_16px_-6px_hsl(var(--clinical-cyan)/0.4)] hover:bg-clinical-cyan/24",
+          "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-800/60 dark:bg-sky-950/40 dark:text-sky-200",
         warn:
-          "border-clinical-warn/65 bg-clinical-warn/24 text-amber-950 hover:bg-clinical-warn/34",
+          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200",
         danger:
-          "border-clinical-danger/60 bg-clinical-danger/22 text-rose-950 shadow-[0_0_20px_-6px_hsl(var(--clinical-danger)/0.45)] hover:bg-clinical-danger/30",
-        outline: "border-slate-300/85 bg-slate-100/95 text-slate-800 hover:bg-slate-200/90 focus-visible:ring-2 focus-visible:ring-slate-400/60",
+          "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200",
+        outline:
+          "border-border bg-card text-foreground",
         allergies:
-          "border-rose-300/95 bg-rose-100/95 text-rose-900 hover:bg-rose-200/90 focus-visible:ring-2 focus-visible:ring-rose-300/75",
+          "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200",
         medications:
-          "border-blue-300/95 bg-blue-100/95 text-blue-900 hover:bg-blue-200/90 focus-visible:ring-2 focus-visible:ring-blue-300/75",
+          "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-800/60 dark:bg-sky-950/40 dark:text-sky-200",
         problems:
-          "border-amber-300/95 bg-amber-100/95 text-amber-950 hover:bg-amber-200/90 focus-visible:ring-2 focus-visible:ring-amber-300/75",
+          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200",
         notes:
-          "border-teal-300/95 bg-teal-100/95 text-teal-900 hover:bg-teal-200/90 focus-visible:ring-2 focus-visible:ring-teal-300/75",
+          "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-200",
         risk:
-          "border-amber-400/95 bg-gradient-to-r from-amber-100 to-rose-100 text-rose-900 hover:from-amber-200 hover:to-rose-200 focus-visible:ring-2 focus-visible:ring-amber-400/75",
+          "border-rose-200 bg-rose-50 text-[#B91C1C] dark:border-rose-800/60 dark:bg-rose-950/50 dark:text-rose-200",
+        ctas1:
+          "border-rose-200 bg-[#FEE2E2] text-[#B91C1C] dark:border-rose-800/60 dark:bg-rose-950/50 dark:text-rose-200",
+        ctas2:
+          "border-rose-200 bg-[#FEE2E2] text-[#B91C1C] dark:border-rose-800/60 dark:bg-rose-950/50 dark:text-rose-200",
+        ctas3:
+          "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200",
+        ctas4:
+          "border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-800/60 dark:bg-sky-950/40 dark:text-sky-200",
+        ctas5:
+          "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-200",
       },
     },
     defaultVariants: {

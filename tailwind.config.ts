@@ -76,13 +76,25 @@ const config: Config = {
           warn: "hsl(var(--clinical-warn))",
           danger: "hsl(var(--clinical-danger))",
         },
+        action: {
+          DEFAULT: "hsl(var(--action))",
+          foreground: "hsl(var(--action-foreground))",
+        },
+        sidebar: {
+          DEFAULT: "hsl(var(--sidebar))",
+          foreground: "hsl(var(--sidebar-foreground))",
+          muted: "hsl(var(--sidebar-muted))",
+          accent: "hsl(var(--sidebar-accent))",
+          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
+          border: "hsl(var(--sidebar-border))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
-        "3xl": "1.5rem",
-        "4xl": "1.75rem",
+        "3xl": "0.75rem",
+        "4xl": "1rem",
       },
       keyframes: {
         "pulse-glow": {
