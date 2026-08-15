@@ -1411,13 +1411,13 @@ function cleanVoiceCommand(input: string): string {
 }
 
 function isAffirmative(input: string): boolean {
-  return /^(?:yes|yeah|yep|correct|that's correct|that is correct|right|confirmed)\b/i.test(
+  return /^(?:yes|yeah|yep|yup|correct|that's correct|that is correct|right|confirm(?:ed)?|go ahead|do it|create(?: the)? patient|admit(?: the)? patient|proceed|ok|okay|sure)\b/i.test(
     input.trim()
   );
 }
 
 function isNegative(input: string): boolean {
-  return /^(?:no|nope|incorrect|wrong|not correct|that's wrong|that is wrong)\b/i.test(
+  return /^(?:no|nope|incorrect|wrong|not correct|that's wrong|that is wrong|cancel|don't create|dont create|stop|never mind|nevermind)\b/i.test(
     input.trim()
   );
 }
@@ -1928,7 +1928,7 @@ function getNextAdmissionStep(draft: AdmissionDraft): AdmissionStep {
 }
 
 const CORRECTION_FIELD_PROMPT =
-  "Which field should I correct: name, age and sex, chief concern, room, or medications?";
+  "Okay. What would you like to change? Name, age and sex, chief concern, room, or medications?";
 
 function parseCorrectionFieldChoice(input: string): AdmissionStep | null {
   const low = input.toLowerCase();
@@ -2203,13 +2203,27 @@ function buildAdmissionPayload(data: Partial<DemoPatient>): Record<string, unkno
 }
 
 function buildAdmissionFinalizeMessage(
-  patient: DemoPatient,
-  opts: { early: boolean; roomLabel: string }
+  _patient: DemoPatient,
+  _opts: { early: boolean; roomLabel: string }
 ): string {
-  if (opts.early) {
-    return `${patient.name} has been admitted. Chart created with the information provided. You can update the record later.`;
+  return "Patient successfully admitted.";
+}
+
+function missingAdmissionFieldPrompt(draft: AdmissionDraft): string | null {
+  const d = draft.data;
+  if (!d.name?.trim() || !draft.nameConfirmed) {
+    return "I still need the patient's name before I can create the chart.";
   }
-  return `${patient.name} admitted to ${opts.roomLabel}. Chart created. MRN assigned: ${patient.mrn}.`;
+  if (!(typeof d.age === "number" && Number.isFinite(d.age)) || !d.sex) {
+    return "I still need the patient's age and sex before I can create the chart.";
+  }
+  if (!d.chiefConcern?.trim()) {
+    return "I still need the patient's chief concern before I can create the chart.";
+  }
+  if (!d.room?.trim()) {
+    return "I still need the patient's room before I can create the chart.";
+  }
+  return null;
 }
 
 function parseAdmitDetails(command: string): { name: string; room?: string } | null {
@@ -2756,6 +2770,7 @@ export default function VitalOsClient() {
   });
   const [admissionConversation, setAdmissionConversation] =
     React.useState<AdmissionDraft>(EMPTY_ADMISSION);
+  const isCreatingPatientRef = React.useRef(false);
   const [requestedPatientView, setRequestedPatientView] =
     React.useState<RequestedPatientView | null>(null);
   const conversationTurnsRef = React.useRef<ConversationTurn[]>([]);
@@ -4018,6 +4033,11 @@ export default function VitalOsClient() {
         draft: AdmissionDraft,
         early: boolean
       ) => {
+        if (isCreatingPatientRef.current) {
+          console.warn("[PATIENT CREATE] Ignoring duplicate confirmation while create is in progress");
+          return;
+        }
+
         const d = draft.data;
         const nameOk = Boolean(d.name?.trim());
         const ageOk = typeof d.age === "number" && Number.isFinite(d.age);
@@ -4028,30 +4048,65 @@ export default function VitalOsClient() {
 
         if (!ready) {
           setAdmissionConversation(draft);
-          pushLocalAssistantResponse(command, admissionPromptForStep(draft));
+          const missingPrompt = missingAdmissionFieldPrompt(draft);
+          pushLocalAssistantResponse(
+            command,
+            missingPrompt ?? admissionPromptForStep(draft)
+          );
           return;
         }
-        const res = await fetch("/api/patients", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...roleRequestHeaders(apiRole),
-          },
-          body: JSON.stringify(buildAdmissionPayload(draft.data)),
-        });
-        if (!res.ok) {
-          pushLocalAssistantResponse(command, "Admit failed. Try again.");
-          return;
+
+        const payload = buildAdmissionPayload(draft.data);
+        console.log("[PATIENT CREATE] Frontend payload:", payload);
+
+        isCreatingPatientRef.current = true;
+        try {
+          const res = await fetch("/api/patients", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...roleRequestHeaders(apiRole),
+            },
+            body: JSON.stringify(payload),
+          });
+          const body = (await res.json().catch(() => ({}))) as {
+            patient?: DemoPatient;
+            error?: string;
+            code?: string;
+            details?: string;
+            hint?: string;
+          };
+          console.log("[PATIENT CREATE] API response:", {
+            status: res.status,
+            ok: res.ok,
+            error: body.error,
+            code: body.code,
+            details: body.details,
+            hint: body.hint,
+            patientId: body.patient?.id,
+          });
+          if (!res.ok) {
+            const detail = body.error?.trim() || `HTTP ${res.status}`;
+            pushLocalAssistantResponse(
+              command,
+              `Unable to create patient: ${detail}`
+            );
+            return;
+          }
+          await refreshPatients();
+          setAdmissionConversation(EMPTY_ADMISSION);
+          const created = body.patient;
+          if (created?.id) {
+            setSelectedPatientId(created.id);
+          }
+          const roomLabel = created?.room ?? draft.data.room ?? "Unassigned";
+          const message = created
+            ? buildAdmissionFinalizeMessage(created, { early, roomLabel })
+            : "Patient successfully admitted.";
+          pushLocalAssistantResponse(command, message);
+        } finally {
+          isCreatingPatientRef.current = false;
         }
-        const body = (await res.json().catch(() => ({}))) as { patient?: DemoPatient };
-        await refreshPatients();
-        setAdmissionConversation(EMPTY_ADMISSION);
-        const created = body.patient;
-        const roomLabel = created?.room ?? draft.data.room ?? "Unassigned";
-        const message = created
-          ? buildAdmissionFinalizeMessage(created, { early, roomLabel })
-          : `${draft.data.name} has been admitted.`;
-        pushLocalAssistantResponse(command, message);
       };
 
       if (admissionConversation.active) {

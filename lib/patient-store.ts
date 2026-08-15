@@ -50,7 +50,11 @@ async function seedDemoPatientsIfEmpty(): Promise<void> {
   if ((count ?? 0) > 0) return;
 
   const rows = (DEMO_PATIENTS as DemoPatient[]).map((p) => demoPatientToRow(p));
-  const { error } = await supabase.from("patients").insert(rows);
+  let { error } = await supabase.from("patients").insert(rows);
+  if (error && isMissingColumnError(error)) {
+    const stripped = rows.map((r) => stripOptionalPatientColumns(r));
+    ({ error } = await supabase.from("patients").insert(stripped as typeof rows));
+  }
   if (error) throw error;
 }
 
@@ -58,7 +62,11 @@ function isDischargedStatus(status: string | null | undefined): boolean {
   return /^discharged$/i.test((status ?? "").trim());
 }
 
-function isMissingColumnError(error: { message?: string }): boolean {
+function isMissingColumnError(error: {
+  message?: string;
+  code?: string;
+}): boolean {
+  if (error.code === "PGRST204") return true;
   const msg = (error.message ?? "").toLowerCase();
   return (
     /column/.test(msg) &&
@@ -185,14 +193,70 @@ export async function createPatientFromPayload(
   const patient = payloadToDemoPatient(o, id, mrn);
   const row = demoPatientToRow(patient);
 
+  console.log("[PATIENT CREATE] Parsed payload / insert row:", {
+    id: row.id,
+    mrn: row.mrn,
+    name: row.name,
+    age: row.age,
+    sex: row.sex,
+    room: row.room,
+    chief_concern: row.chief_concern,
+    medications: row.medications,
+    allergies: row.allergies,
+    problems: row.problems,
+    acuity: row.acuity,
+    status: row.status,
+    dob: row.dob,
+    last_visit: row.last_visit,
+    blood_type: row.blood_type,
+    emergency_contact: row.emergency_contact,
+    chart_notes: row.chart_notes,
+    discharged_at: row.discharged_at,
+  });
+
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("patients")
     .insert(row)
     .select("*")
     .single();
 
-  if (error) throw error;
+  // Live DBs may not have optional voice-field columns yet (chart_notes, discharged_*).
+  // Mirror updatePatientById: strip those columns and retry once.
+  if (error && isMissingColumnError(error)) {
+    console.warn(
+      "[PATIENT CREATE] Missing optional column; retrying without chart_notes/discharged_*:",
+      {
+        message: error.message,
+        code: error.code,
+      }
+    );
+    const stripped = stripOptionalPatientColumns(row);
+    ({ data, error } = await supabase
+      .from("patients")
+      .insert(stripped as typeof row)
+      .select("*")
+      .single());
+  }
+
+  if (error) {
+    console.error("[SUPABASE INSERT ERROR]", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    });
+    throw new Error(
+      [
+        error.message,
+        error.code ? `code=${error.code}` : null,
+        error.details ? `details=${error.details}` : null,
+        error.hint ? `hint=${error.hint}` : null,
+      ]
+        .filter(Boolean)
+        .join(" | ")
+    );
+  }
   const created = rowToDemoPatient(data as PatientRow);
   return { patient: created, event: { action: "created", patientId: created.id } };
 }
