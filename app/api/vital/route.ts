@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth";
 import { listPatients } from "@/lib/patient-store";
 import {
+  GEMINI_MODEL,
   runVital,
   type ConversationTurn,
   type VitalMode,
@@ -131,7 +132,7 @@ export async function GET() {
       status: "online",
       provider: "gemini",
       hasApiKey: Boolean(process.env.GEMINI_API_KEY?.trim()),
-      models: ["gemini-1.5-flash"],
+      models: [GEMINI_MODEL],
       rosterPatients: rosterCount,
     },
     { headers: { "Cache-Control": "no-store" } }

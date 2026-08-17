@@ -8,7 +8,17 @@ import { Type } from "@google/genai";
 import type { DemoPatient } from "@/lib/demo-patients";
 import { formatRosterForPrompt, patientToSnapshot } from "@/lib/demo-patients";
 import { normalizeClinicalIntent } from "@/lib/clinical-normalization";
-import { gemini, GEMINI_CLINICAL_MODEL } from "@/lib/gemini-client";
+import {
+  getGemini,
+  isGeminiConfigured,
+  GEMINI_CLINICAL_MODEL,
+} from "@/lib/gemini-client";
+import { groqChatJson, isGroqConfigured } from "@/lib/groq-client";
+import {
+  FALLBACK_TIMEOUT_MS,
+  PRIMARY_TIMEOUT_MS,
+  runWithFallback,
+} from "@/lib/llm-race";
 import type { VitalMode } from "@/lib/vital-llm";
 
 export const CLINICAL_INTENTS = [
@@ -26,6 +36,8 @@ export const CLINICAL_INTENTS = [
 ] as const;
 
 export type ClinicalIntentType = (typeof CLINICAL_INTENTS)[number];
+
+export type IntentProvider = "groq" | "gemini";
 
 export type ConversationTurn = {
   role: "user" | "assistant";
@@ -49,6 +61,12 @@ export interface ParsedClinicalIntent {
   clarificationQuestion: string | null;
   reasoningSummary: string | null;
   originalTranscript: string;
+  /** Which leg of the provider chain answered. */
+  provider?: IntentProvider;
+  /** Wall-clock time of the winning leg. */
+  parseLatencyMs?: number;
+  /** Null when Groq answered inside its budget; otherwise why we fell back. */
+  fallbackReason?: string | null;
 }
 
 export interface ParseClinicalIntentInput {
@@ -208,6 +226,121 @@ function toParsedIntent(
   });
 }
 
+/* -------------------------------------------------------------------------
+ * Provider legs — Groq primary (latency), Gemini fallback (reliability).
+ * Each leg parses and shape-checks its own output, so malformed JSON from one
+ * provider demotes it to the next instead of reaching the clinician.
+ * ---------------------------------------------------------------------- */
+
+/** Groq has no server-side schema binding, so the contract lives in the prompt. */
+const GROQ_JSON_CONTRACT = `Respond with a single JSON object, no prose and no markdown fences, using exactly these keys:
+{
+  "intent": one of ${CLINICAL_INTENTS.join(" | ")},
+  "patientName": string or null,
+  "patientId": string or null,
+  "medication": string or null,
+  "dose": string or null,
+  "route": string or null,
+  "frequency": string or null,
+  "symptoms": array of strings,
+  "problem": string or null,
+  "status": string or null,
+  "requestedSections": array of lowercase strings,
+  "confidence": number between 0 and 1,
+  "needsConfirmation": boolean,
+  "clarificationQuestion": string or null,
+  "reasoningSummary": string or null
+}`;
+
+function assertIntentShape(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Model returned a non-object intent payload.");
+  }
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.intent !== "string" || !obj.intent.trim()) {
+    throw new Error("Model intent payload is missing 'intent'.");
+  }
+  if (obj.confidence !== undefined && typeof obj.confidence !== "number") {
+    throw new Error("Model intent payload has a non-numeric 'confidence'.");
+  }
+  return obj;
+}
+
+async function parseIntentWithGroq(
+  input: ParseClinicalIntentInput,
+  signal: AbortSignal
+): Promise<ParsedClinicalIntent> {
+  const text = await groqChatJson({
+    system: `${INTENT_SYSTEM_PROMPT}\n\n${GROQ_JSON_CONTRACT}`,
+    user: buildUserPrompt(input),
+    signal,
+    temperature: 0.2,
+    maxTokens: 768,
+  });
+  return toParsedIntent(
+    assertIntentShape(parseIntentJson(text)),
+    input.transcript.trim()
+  );
+}
+
+async function parseIntentWithGemini(
+  input: ParseClinicalIntentInput,
+  signal: AbortSignal
+): Promise<ParsedClinicalIntent> {
+  const response = await getGemini().models.generateContent({
+    model: GEMINI_CLINICAL_MODEL,
+    contents: buildUserPrompt(input),
+    config: {
+      systemInstruction: INTENT_SYSTEM_PROMPT,
+      temperature: 0.2,
+      maxOutputTokens: 768,
+      responseMimeType: "application/json",
+      responseJsonSchema: INTENT_JSON_SCHEMA,
+      abortSignal: signal,
+    },
+  });
+
+  const text = response.text?.trim();
+  if (!text) {
+    throw new Error("Gemini returned an empty intent parse.");
+  }
+  return toParsedIntent(
+    assertIntentShape(parseIntentJson(text)),
+    input.transcript.trim()
+  );
+}
+
+/** Safe terminal state: ask rather than act on an intent we could not parse. */
+function unknownIntent(
+  transcript: string,
+  reason: string
+): ParsedClinicalIntent {
+  return normalizeClinicalIntent({
+    intent: "unknown",
+    patientName: null,
+    patientId: null,
+    medication: null,
+    dose: null,
+    route: null,
+    frequency: null,
+    symptoms: [],
+    problem: null,
+    status: null,
+    requestedSections: [],
+    confidence: 0,
+    needsConfirmation: false,
+    clarificationQuestion:
+      "I did not catch that clearly. Could you say it again?",
+    reasoningSummary: reason,
+    originalTranscript: transcript,
+    fallbackReason: reason,
+  });
+}
+
+/**
+ * Transcript -> structured clinical intent.
+ * Groq answers inside 2500ms or it is cancelled and Gemini takes the turn.
+ */
 export async function parseClinicalIntent(
   input: ParseClinicalIntentInput,
   opts?: { signal?: AbortSignal }
@@ -217,44 +350,47 @@ export async function parseClinicalIntent(
     throw new Error("Empty transcript.");
   }
 
-  const response = await gemini.models.generateContent({
-    model: GEMINI_CLINICAL_MODEL,
-    contents: buildUserPrompt(input),
-    config: {
-      systemInstruction: INTENT_SYSTEM_PROMPT,
-      temperature: 0.2,
-      maxOutputTokens: 768,
-      responseMimeType: "application/json",
-      responseJsonSchema: INTENT_JSON_SCHEMA,
-      abortSignal: opts?.signal,
-    },
-  });
-
-  const text = response.text?.trim();
-  if (!text) {
-    throw new Error("Gemini returned an empty intent parse.");
-  }
-
   try {
-    return toParsedIntent(parseIntentJson(text), transcript);
-  } catch {
-    return normalizeClinicalIntent({
-      intent: "unknown",
-      patientName: null,
-      patientId: null,
-      medication: null,
-      dose: null,
-      route: null,
-      frequency: null,
-      symptoms: [],
-      problem: null,
-      status: null,
-      requestedSections: [],
-      confidence: 0,
-      needsConfirmation: false,
-      clarificationQuestion: null,
-      reasoningSummary: "Failed to parse model JSON.",
-      originalTranscript: transcript,
-    });
+    const race = await runWithFallback<ParsedClinicalIntent>(
+      [
+        isGroqConfigured()
+          ? {
+              provider: "groq",
+              timeoutMs: PRIMARY_TIMEOUT_MS,
+              run: (signal) => parseIntentWithGroq(input, signal),
+            }
+          : null,
+        isGeminiConfigured()
+          ? {
+              provider: "gemini",
+              timeoutMs: FALLBACK_TIMEOUT_MS,
+              run: (signal) => parseIntentWithGemini(input, signal),
+            }
+          : null,
+      ],
+      {
+        signal: opts?.signal,
+        onAttempt: (record) => {
+          if (!record.ok) {
+            console.warn("[INTENT PARSE] provider demoted", record);
+          }
+        },
+      }
+    );
+
+    return {
+      ...race.value,
+      provider: race.provider as IntentProvider,
+      parseLatencyMs: race.latencyMs,
+      fallbackReason: race.fallbackReason,
+    };
+  } catch (err) {
+    /* Caller hung up — propagate instead of pretending we parsed something. */
+    if (opts?.signal?.aborted) throw err;
+
+    const message =
+      err instanceof Error ? err.message : "Intent parsing failed.";
+    console.error("[INTENT PARSE] all providers failed:", message);
+    return unknownIntent(transcript, message);
   }
 }
