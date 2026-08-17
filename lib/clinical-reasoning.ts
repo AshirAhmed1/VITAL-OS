@@ -7,7 +7,7 @@ import { Type } from "@google/genai";
 
 import type { DemoPatient } from "@/lib/demo-patients";
 import { patientToSnapshot } from "@/lib/demo-patients";
-import { gemini, GEMINI_CLINICAL_MODEL } from "@/lib/gemini-client";
+import { getGemini, GEMINI_CLINICAL_MODEL } from "@/lib/gemini-client";
 
 export type DiagnosisLikelihood = "high" | "moderate" | "low";
 
@@ -166,7 +166,7 @@ export async function runClinicalReasoning(
     ? `\nPATIENT CHART:\n${patientToSnapshot(input.patient)}\n`
     : "\nNo specific patient chart attached.\n";
 
-  const response = await gemini.models.generateContent({
+  const response = await getGemini().models.generateContent({
     model: GEMINI_CLINICAL_MODEL,
     contents: `${patientBlock}
 SYMPTOMS MENTIONED: ${symptomList.length ? symptomList.join(", ") : "(from utterance)"}

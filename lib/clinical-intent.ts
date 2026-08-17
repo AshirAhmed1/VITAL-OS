@@ -8,7 +8,7 @@ import { Type } from "@google/genai";
 import type { DemoPatient } from "@/lib/demo-patients";
 import { formatRosterForPrompt, patientToSnapshot } from "@/lib/demo-patients";
 import { normalizeClinicalIntent } from "@/lib/clinical-normalization";
-import { gemini, GEMINI_CLINICAL_MODEL } from "@/lib/gemini-client";
+import { getGemini, GEMINI_CLINICAL_MODEL } from "@/lib/gemini-client";
 import type { VitalMode } from "@/lib/vital-llm";
 
 export const CLINICAL_INTENTS = [
@@ -217,7 +217,7 @@ export async function parseClinicalIntent(
     throw new Error("Empty transcript.");
   }
 
-  const response = await gemini.models.generateContent({
+  const response = await getGemini().models.generateContent({
     model: GEMINI_CLINICAL_MODEL,
     contents: buildUserPrompt(input),
     config: {
