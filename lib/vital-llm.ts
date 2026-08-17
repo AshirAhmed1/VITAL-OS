@@ -76,7 +76,8 @@ export interface VitalResponse {
   storeEvents?: PatientStoreEvent[];
 }
 
-const GEMINI_MODEL = "gemini-1.5-flash";
+export const GEMINI_MODEL =
+  process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 const MAX_HISTORY_MESSAGES = 24;
 const MAX_TOOL_ROUNDS = 8;

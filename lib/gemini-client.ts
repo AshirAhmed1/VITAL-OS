@@ -34,4 +34,4 @@ export function getGemini(): GoogleGenAI {
 }
 
 export const GEMINI_CLINICAL_MODEL =
-  process.env.GEMINI_CLINICAL_MODEL?.trim() || "gemini-2.0-flash";
+  process.env.GEMINI_CLINICAL_MODEL?.trim() || "gemini-3.5-flash";
