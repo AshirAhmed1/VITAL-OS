@@ -45,6 +45,8 @@ import {
 } from "@/components/voice-hero-visual";
 import { VitalLogo } from "@/components/vital-logo";
 import { useAuth } from "@/components/auth-provider";
+import { useUtteranceRecorder } from "@/hooks/use-utterance-recorder";
+import { chooseTranscript, type TranscriptChoice } from "@/lib/whisper-stt";
 import {
   ACCESS_RESTRICTED_MESSAGE,
   AI_ASSISTANT_RESTRICTED_MESSAGE,
@@ -2811,6 +2813,12 @@ export default function VitalOsClient() {
   >("charts");
 
   const recognitionRef = React.useRef<SR | null>(null);
+
+  /* Whisper capture. Runs alongside SR: SR is the VAD, Whisper is the transcript. */
+  const recorder = useUtteranceRecorder();
+  const recorderRef = React.useRef(recorder);
+  recorderRef.current = recorder;
+  const [sttChoice, setSttChoice] = React.useState<TranscriptChoice | null>(null);
   const shouldSubmitOnEndRef = React.useRef(false);
   /** True between `onstart` and `onend` — prevents double `start()` (InvalidStateError). */
   const recognitionActiveRef = React.useRef(false);
@@ -3125,6 +3133,53 @@ export default function VitalOsClient() {
     updateHeardPreviewRef.current = updateHeardPreview;
   }, [updateHeardPreview]);
 
+  /**
+   * Closes the utterance, uploads it, and submits whichever transcript won.
+   *
+   * Whisper is authoritative; SR's text is the safety net. A Whisper failure
+   * never blocks the command - it demotes and is reported in the system panel,
+   * because a silent demote is how a dead provider goes unnoticed for weeks.
+   */
+  const finalizeAndSubmit = React.useCallback(
+    async (browserText: string) => {
+      let choice: TranscriptChoice = {
+        text: browserText,
+        source: "browser",
+        degradedReason: "Audio capture unavailable in this browser.",
+      };
+
+      if (recorderRef.current.available) {
+        /* Whisper adds ~400ms between endpoint and submit; show work immediately. */
+        setSystemState("processing");
+        const outcome = await recorderRef.current.finalize(apiRole);
+        choice = outcome
+          ? chooseTranscript(outcome, browserText)
+          : {
+              text: browserText,
+              source: "browser",
+              degradedReason: "Clip too short to transcribe.",
+            };
+      }
+
+      setSttChoice(choice);
+      if (choice.degradedReason) {
+        console.warn("[STT] degraded to browser transcript", choice.degradedReason);
+      }
+
+      if (!choice.text) {
+        setSystemState("idle");
+        return;
+      }
+
+      setLastSubmittedTranscript(choice.text);
+      setHeardPreview(choice.text);
+      await submitRef.current(choice.text);
+    },
+    [apiRole]
+  );
+  const finalizeAndSubmitRef = React.useRef(finalizeAndSubmit);
+  finalizeAndSubmitRef.current = finalizeAndSubmit;
+
   const armSilenceSubmit = React.useCallback(() => {
     if (!voiceSessionActiveRef.current) return;
     if (micMutedRef.current) return;
@@ -3135,15 +3190,14 @@ export default function VitalOsClient() {
       if (!voiceSessionActiveRef.current) return;
       if (micMutedRef.current) return;
       if (systemStateRef.current === "processing") return;
-      const text = (finalRef.current + " " + interimRef.current).trim();
-      if (!text) return;
-      setLastSubmittedTranscript(text);
-      setHeardPreview(text);
+      const browserText = (finalRef.current + " " + interimRef.current).trim();
+      if (!browserText) return;
+      setHeardPreview(browserText);
       setFinalTranscript("");
       finalRef.current = "";
       setInterimTranscript("");
       interimRef.current = "";
-      void submitRef.current(text);
+      void finalizeAndSubmitRef.current(browserText);
     }, 1600);
   }, []);
 
@@ -3153,6 +3207,8 @@ export default function VitalOsClient() {
     globalThis.setTimeout(() => {
       if (!voiceSessionActiveRef.current) return;
       if (micMutedRef.current) return;
+      /* Drop the TTS playback and silence buffered since the last submit. */
+      recorderRef.current.discard();
       startListeningContinueRef.current({ hard: false });
     }, 400);
   }, []);
@@ -3335,9 +3391,9 @@ export default function VitalOsClient() {
       shouldSubmitOnEndRef.current = false;
 
       if (shouldSubmit) {
-        const text = finalRef.current.trim();
-        if (text) {
-          void submitRef.current(text);
+        const browserText = finalRef.current.trim();
+        if (browserText) {
+          void finalizeAndSubmitRef.current(browserText);
         } else {
           setSystemState("idle");
         }
@@ -4937,6 +4993,8 @@ export default function VitalOsClient() {
     setMicMuted(false);
     voiceSessionActiveRef.current = true;
     listeningIntentRef.current = true;
+    setSttChoice(null);
+    void recorderRef.current.start();
     void startListening({ hard: true });
   }, [startListening, stopSpeaking, systemState]);
 
@@ -4952,6 +5010,8 @@ export default function VitalOsClient() {
       window.speechSynthesis.cancel();
     }
     abortRef.current?.abort();
+    recorderRef.current.stop();
+    setSttChoice(null);
     disposeRecognition();
     resetSession();
     setMicMuted(false);
@@ -4997,9 +5057,11 @@ export default function VitalOsClient() {
         recognitionRef.current = null;
         recognitionActiveRef.current = false;
         stopListening({ submit: false });
+        recorderRef.current.stop();
         setSystemState("idle");
       } else {
         listeningIntentRef.current = true;
+        void recorderRef.current.start();
         void startListening({ hard: false });
       }
       return next;
@@ -6620,6 +6682,7 @@ export default function VitalOsClient() {
             audit={audit}
             clinicalReasoning={clinicalReasoning}
             pendingMedicationOrder={pendingMedicationOrder}
+            sttChoice={sttChoice}
           />
         )}
       </AnimatePresence>
@@ -6959,6 +7022,7 @@ function WorkspaceOverlay({
   audit,
   clinicalReasoning,
   pendingMedicationOrder,
+  sttChoice,
 }: {
   tab: "charts" | "response" | "dialogue" | "actions" | "system";
   onTab: (t: "charts" | "response" | "dialogue" | "actions" | "system") => void;
@@ -6984,6 +7048,7 @@ function WorkspaceOverlay({
   audit: AuditEntry[];
   clinicalReasoning: ClinicalReasoningResult | null;
   pendingMedicationOrder: PendingMedicationDraft | null;
+  sttChoice: TranscriptChoice | null;
 }) {
   const tabs: { id: typeof tab; label: string }[] = [
     { id: "charts", label: "Charts" },
@@ -7108,7 +7173,9 @@ function WorkspaceOverlay({
               </p>
             </div>
           )}
-          {tab === "system" && <SystemPanel systemState={systemState} />}
+          {tab === "system" && (
+            <SystemPanel systemState={systemState} sttChoice={sttChoice} />
+          )}
         </div>
       </motion.aside>
     </motion.div>
@@ -7817,12 +7884,32 @@ function AuditPanel({ entries }: { entries: AuditEntry[] }) {
  * System Panel + Footer + Errors
  * ────────────────────────────────────────────────────────────────────────── */
 
-function SystemPanel({ systemState }: { systemState: SystemState }) {
+function SystemPanel({
+  systemState,
+  sttChoice,
+}: {
+  systemState: SystemState;
+  sttChoice: TranscriptChoice | null;
+}) {
+  /* Reports what actually transcribed the last utterance, not what we hope did. */
+  const sttValue =
+    sttChoice === null
+      ? "Whisper via Groq (idle)"
+      : sttChoice.source === "whisper"
+        ? "Whisper via Groq"
+        : sttChoice.source === "browser"
+          ? "Browser SR - Whisper degraded"
+          : "No transcript";
+  const sttTone =
+    sttChoice && sttChoice.source !== "whisper"
+      ? "text-amber-400"
+      : "text-clinical-teal";
+
   const items: { label: string; value: string; tone?: string }[] = [
     {
       label: "STT",
-      value: "Browser SpeechRecognition",
-      tone: "text-clinical-teal",
+      value: sttValue,
+      tone: sttTone,
     },
     {
       label: "TTS",

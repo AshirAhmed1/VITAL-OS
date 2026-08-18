@@ -11,7 +11,13 @@
  * One blob per utterance. The recorder is stopped and restarted at every
  * endpoint instead of slicing a rolling buffer, because only the first chunk
  * of a WebM stream carries the container header — a sliced tail is not
- * independently decodable and Whisper would reject it.
+ * independently decodable and Whisper rejects it with
+ * "could not process file - is it a valid media file?".
+ *
+ * Each recording window owns its OWN chunk array. A shared buffer let a stale
+ * drain and a live one interleave chunks from two different MediaRecorder
+ * instances, producing exactly that error. Window-scoped buffers make the race
+ * structurally impossible rather than merely unlikely.
  */
 
 import * as React from "react";
@@ -43,12 +49,12 @@ export interface UtteranceRecorder {
   /** Acquire the mic and begin an utterance window. Safe to call repeatedly. */
   start: () => Promise<boolean>;
   /**
-   * Close the current utterance, upload it, and immediately reopen a window for
-   * the next one. Returns null when there was nothing worth sending, which the
-   * caller should read as "use the browser transcript".
+   * Close the current utterance, upload it, and reopen a window for the next.
+   * Returns null when there was nothing worth sending, which the caller should
+   * read as "use the browser transcript".
    */
   finalize: (role: string) => Promise<TranscriptionOutcome | null>;
-  /** Drop the current utterance without uploading (barge-in, mute, cancel). */
+  /** Drop the current utterance and reopen a clean window. */
   discard: () => void;
   /** Release the microphone entirely. */
   stop: () => void;
@@ -56,19 +62,25 @@ export interface UtteranceRecorder {
   abortInFlight: () => void;
 }
 
-type RecorderLike = MediaRecorder | null;
+/** One recording window: a recorder plus the chunks only it may write to. */
+type Window = {
+  recorder: MediaRecorder;
+  chunks: Blob[];
+  startedAt: number;
+  mimeType: string;
+  /** Set once this window has been drained, so it can never be drained twice. */
+  closed: boolean;
+};
 
 export function useUtteranceRecorder(): UtteranceRecorder {
   const [status, setStatus] = React.useState<CaptureStatus>("idle");
 
   const streamRef = React.useRef<MediaStream | null>(null);
-  const recorderRef = React.useRef<RecorderLike>(null);
-  const chunksRef = React.useRef<Blob[]>([]);
+  const windowRef = React.useRef<Window | null>(null);
   const mimeRef = React.useRef<string>("audio/webm");
-  const startedAtRef = React.useRef<number>(0);
   const uploadAbortRef = React.useRef<AbortController | null>(null);
-  /* Set while finalize() is draining, so a concurrent discard cannot race it. */
-  const drainingRef = React.useRef(false);
+  /** Serialises finalize/discard so two drains can never overlap. */
+  const opRef = React.useRef<Promise<unknown>>(Promise.resolve());
 
   const available = React.useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -77,34 +89,53 @@ export function useUtteranceRecorder(): UtteranceRecorder {
     return pickRecorderMimeType((m) => MediaRecorder.isTypeSupported(m)) !== null;
   }, []);
 
-  const teardown = React.useCallback(() => {
-    try {
-      recorderRef.current?.stop();
-    } catch {
-      /* Already inactive. */
-    }
-    recorderRef.current = null;
-    chunksRef.current = [];
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
+  /** Runs fn after every previously queued operation, success or failure. */
+  const enqueue = React.useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
+    const next = opRef.current.then(fn, fn);
+    opRef.current = next.catch(() => undefined);
+    return next;
   }, []);
 
-  /** Opens a fresh recorder over the existing stream. Assumes the mic is held. */
-  const openWindow = React.useCallback(() => {
+  /** Opens a fresh window over the existing stream. Assumes the mic is held. */
+  const openWindow = React.useCallback((): boolean => {
     const stream = streamRef.current;
     if (!stream) return false;
 
     const recorder = new MediaRecorder(stream, { mimeType: mimeRef.current });
-    chunksRef.current = [];
-    startedAtRef.current = Date.now();
-
-    recorder.ondataavailable = (ev: BlobEvent) => {
-      if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
+    const win: Window = {
+      recorder,
+      chunks: [],
+      startedAt: Date.now(),
+      mimeType: mimeRef.current,
+      closed: false,
     };
 
-    recorder.start(TIMESLICE_MS);
-    recorderRef.current = recorder;
+    /* Closes over `win`, so chunks can only ever land in their own window. */
+    recorder.ondataavailable = (ev: BlobEvent) => {
+      if (ev.data && ev.data.size > 0) win.chunks.push(ev.data);
+    };
+
+    try {
+      recorder.start(TIMESLICE_MS);
+    } catch {
+      return false;
+    }
+    windowRef.current = win;
     return true;
+  }, []);
+
+  const teardown = React.useCallback(() => {
+    const win = windowRef.current;
+    if (win && win.recorder.state !== "inactive") {
+      try {
+        win.recorder.stop();
+      } catch {
+        /* Already stopping. */
+      }
+    }
+    windowRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
   }, []);
 
   const start = React.useCallback(async (): Promise<boolean> => {
@@ -112,7 +143,7 @@ export function useUtteranceRecorder(): UtteranceRecorder {
       setStatus("unsupported");
       return false;
     }
-    if (recorderRef.current?.state === "recording") return true;
+    if (windowRef.current?.recorder.state === "recording") return true;
 
     try {
       if (!streamRef.current) {
@@ -143,85 +174,103 @@ export function useUtteranceRecorder(): UtteranceRecorder {
       return true;
     } catch (err) {
       const name = (err as { name?: string } | null)?.name;
-      /* SR has already surfaced its own permission error; do not double-report. */
+      /* SR surfaces its own permission error; do not double-report. */
       setStatus(name === "NotAllowedError" ? "denied" : "error");
       teardown();
       return false;
     }
   }, [available, openWindow, teardown]);
 
-  /** Closes the recorder and resolves with everything it buffered. */
-  const drain = React.useCallback((): Promise<Blob | null> => {
-    const recorder = recorderRef.current;
-    if (!recorder || recorder.state === "inactive") {
-      return Promise.resolve(null);
-    }
-
-    return new Promise<Blob | null>((resolve) => {
-      let settled = false;
-      let guard: ReturnType<typeof setTimeout> | undefined;
-
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        if (guard) clearTimeout(guard);
-        const parts = chunksRef.current;
-        chunksRef.current = [];
-        resolve(
-          parts.length ? new Blob(parts, { type: mimeRef.current }) : null
-        );
-      };
-
-      /* onstop fires after the final ondataavailable, so the tail is included.
-         The guard covers a recorder that never fires onstop — without it a
-         wedged encoder would hold the submit path open indefinitely. */
-      recorder.onstop = finish;
-      guard = setTimeout(finish, STOP_DRAIN_TIMEOUT_MS);
-
-      try {
-        recorder.stop();
-      } catch {
-        finish();
+  /**
+   * Closes one specific window and resolves with the audio IT buffered.
+   * Takes the window as an argument rather than reading a ref, so a queued
+   * drain cannot accidentally harvest a window opened after it was scheduled.
+   */
+  const drainWindow = React.useCallback(
+    (win: Window): Promise<{ blob: Blob | null; durationMs: number }> => {
+      if (win.closed || win.recorder.state === "inactive") {
+        win.closed = true;
+        return Promise.resolve({
+          blob: win.chunks.length
+            ? new Blob(win.chunks, { type: win.mimeType })
+            : null,
+          durationMs: Date.now() - win.startedAt,
+        });
       }
-    });
-  }, []);
+      win.closed = true;
 
-  const finalize = React.useCallback(
-    async (role: string): Promise<TranscriptionOutcome | null> => {
-      if (!recorderRef.current) return null;
+      return new Promise((resolve) => {
+        let settled = false;
+        let guard: ReturnType<typeof setTimeout> | undefined;
 
-      drainingRef.current = true;
-      const durationMs = Date.now() - startedAtRef.current;
-      const blob = await drain();
-      drainingRef.current = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (guard) clearTimeout(guard);
+          resolve({
+            blob: win.chunks.length
+              ? new Blob(win.chunks, { type: win.mimeType })
+              : null,
+            durationMs: Date.now() - win.startedAt,
+          });
+        };
 
-      /* Reopen immediately: the clinician may already be speaking the next
-         command while this one is still uploading. */
-      openWindow();
+        /* onstop fires after the final ondataavailable, so the tail is included.
+           The guard covers an encoder that never fires onstop — without it a
+           wedged recorder would hold the submit path open indefinitely. */
+        win.recorder.onstop = finish;
+        guard = setTimeout(finish, STOP_DRAIN_TIMEOUT_MS);
 
-      if (!blob || durationMs < MIN_UTTERANCE_MS) return null;
-
-      uploadAbortRef.current?.abort();
-      const controller = new AbortController();
-      uploadAbortRef.current = controller;
-
-      const extension = mimeRef.current.includes("mp4") ? "mp4" : "webm";
-      return postUtterance({
-        audio: blob,
-        role,
-        durationMs,
-        filename: `utterance.${extension}`,
-        signal: controller.signal,
+        try {
+          win.recorder.stop();
+        } catch {
+          finish();
+        }
       });
     },
-    [drain, openWindow]
+    []
+  );
+
+  const finalize = React.useCallback(
+    (role: string): Promise<TranscriptionOutcome | null> =>
+      enqueue(async () => {
+        const win = windowRef.current;
+        if (!win) return null;
+        windowRef.current = null;
+
+        const { blob, durationMs } = await drainWindow(win);
+
+        /* Reopen immediately: the clinician may already be speaking the next
+           command while this one is still uploading. */
+        openWindow();
+
+        if (!blob || durationMs < MIN_UTTERANCE_MS) return null;
+
+        uploadAbortRef.current?.abort();
+        const controller = new AbortController();
+        uploadAbortRef.current = controller;
+
+        const extension = win.mimeType.includes("mp4") ? "mp4" : "webm";
+        return postUtterance({
+          audio: blob,
+          role,
+          durationMs,
+          filename: `utterance.${extension}`,
+          signal: controller.signal,
+        });
+      }),
+    [drainWindow, enqueue, openWindow]
   );
 
   const discard = React.useCallback(() => {
-    if (drainingRef.current) return;
-    chunksRef.current = [];
-    startedAtRef.current = Date.now();
-  }, []);
+    void enqueue(async () => {
+      const win = windowRef.current;
+      if (!win) return;
+      windowRef.current = null;
+      await drainWindow(win);
+      openWindow();
+    });
+  }, [drainWindow, enqueue, openWindow]);
 
   const abortInFlight = React.useCallback(() => {
     uploadAbortRef.current?.abort();
