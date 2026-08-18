@@ -7154,8 +7154,15 @@ function WorkspaceOverlay({
     <motion.div
       className="fixed inset-0 z-50 flex"
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      animate={{ opacity: 1, pointerEvents: "auto" }}
+      /* pointerEvents goes dead the instant exit starts, so a stalled or
+         interrupted unmount can never leave an invisible full-screen layer
+         swallowing clicks on the page underneath. */
+      exit={{
+        opacity: 0,
+        pointerEvents: "none",
+        transition: { duration: 0.18, ease: "easeIn" },
+      }}
     >
       <button
         type="button"
@@ -7166,7 +7173,13 @@ function WorkspaceOverlay({
       <motion.aside
         initial={{ x: "100%" }}
         animate={{ x: 0 }}
-        exit={{ x: "100%" }}
+        /* Spring on the way in, tween on the way out. A spring approaches its
+           target asymptotically and may never report completion, and
+           AnimatePresence will not unmount the tree until it does. */
+        exit={{
+          x: "100%",
+          transition: { type: "tween", duration: 0.2, ease: "easeIn" },
+        }}
         transition={{ type: "spring", damping: 28, stiffness: 320 }}
         id="vital-workspace-panel"
         role="dialog"
