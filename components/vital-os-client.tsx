@@ -22,6 +22,7 @@ import {
   Mic,
   MicOff,
   NotebookTabs,
+  PanelRight,
   Pause,
   Phone,
   Settings,
@@ -57,6 +58,7 @@ import {
 import type { ConversationTurn } from "@/lib/vital-llm";
 import type { ClinicalReasoningResult } from "@/lib/clinical-reasoning";
 import type { ClinicalCommandResponse } from "@/app/api/clinical-command/route";
+import type { IntentProvider } from "@/lib/clinical-intent";
 import type { DemoMedication, DemoPatient } from "@/lib/demo-patients";
 import { patientToSnapshot } from "@/lib/demo-patients";
 import {
@@ -2811,6 +2813,34 @@ export default function VitalOsClient() {
   const [workspaceTab, setWorkspaceTab] = React.useState<
     "charts" | "response" | "dialogue" | "actions" | "system"
   >("charts");
+  const workspaceToggleRef = React.useRef<HTMLButtonElement | null>(null);
+
+  const toggleWorkspace = React.useCallback(() => {
+    setWorkspaceOpen((open) => !open);
+  }, []);
+
+  /* Esc closes the panel. Bound only while open so it cannot swallow Esc
+     from the typed-command input or a future dialog. */
+  React.useEffect(() => {
+    if (!workspaceOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setWorkspaceOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [workspaceOpen]);
+
+  /* Return focus to the toggle on close so keyboard users are not dumped
+     at the top of the document. */
+  const workspaceWasOpenRef = React.useRef(false);
+  React.useEffect(() => {
+    if (workspaceWasOpenRef.current && !workspaceOpen) {
+      workspaceToggleRef.current?.focus();
+    }
+    workspaceWasOpenRef.current = workspaceOpen;
+  }, [workspaceOpen]);
 
   const recognitionRef = React.useRef<SR | null>(null);
 
@@ -2819,6 +2849,17 @@ export default function VitalOsClient() {
   const recorderRef = React.useRef(recorder);
   recorderRef.current = recorder;
   const [sttChoice, setSttChoice] = React.useState<TranscriptChoice | null>(null);
+  /* Drives the amber dot on the workspace toggle: the degrade has to be
+     visible without opening the panel, or it is not really visible. */
+  const sttDegraded = sttChoice !== null && sttChoice.degradedReason !== null;
+
+  /* Which leg of the intent chain answered last. Reported, never assumed —
+     two silent model deprecations were missed because the panel was a literal. */
+  const [intentRoute, setIntentRoute] = React.useState<{
+    provider: IntentProvider;
+    latencyMs: number | null;
+    fallbackReason: string | null;
+  } | null>(null);
   const shouldSubmitOnEndRef = React.useRef(false);
   /** True between `onstart` and `onend` — prevents double `start()` (InvalidStateError). */
   const recognitionActiveRef = React.useRef(false);
@@ -3683,6 +3724,16 @@ export default function VitalOsClient() {
       data: ClinicalCommandResponse
     ): Promise<boolean> => {
       const { action, assistantResponse, parsedIntent } = data;
+
+      /* Recorded before the unknown-intent bail: a parse that came back
+         unknown still tells us which provider produced it. */
+      if (parsedIntent.provider) {
+        setIntentRoute({
+          provider: parsedIntent.provider,
+          latencyMs: parsedIntent.parseLatencyMs ?? null,
+          fallbackReason: parsedIntent.fallbackReason ?? null,
+        });
+      }
 
       if (action?.type === "unknown" || parsedIntent.intent === "unknown") {
         return false;
@@ -5405,6 +5456,37 @@ export default function VitalOsClient() {
                   Care Mode: {MODE_LABEL[mode]}
                 </Badge>
               )}
+              <button
+                ref={workspaceToggleRef}
+                type="button"
+                onClick={toggleWorkspace}
+                aria-haspopup="dialog"
+                aria-expanded={workspaceOpen}
+                aria-controls="vital-workspace-panel"
+                className={cn(
+                  "relative inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                  workspaceOpen
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+                title={
+                  workspaceOpen
+                    ? "Close workspace panel (Esc)"
+                    : "Open workspace panel - charts, log, tools, system"
+                }
+              >
+                <PanelRight className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="hidden sm:inline">Workspace</span>
+                {sttDegraded && (
+                  <>
+                    <span
+                      className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-background"
+                      aria-hidden
+                    />
+                    <span className="sr-only">Speech-to-text degraded</span>
+                  </>
+                )}
+              </button>
               <span className="ml-1 text-sm font-medium tabular-nums text-muted-foreground">{fmtTime(now)}</span>
             </div>
           </div>
@@ -6683,6 +6765,7 @@ export default function VitalOsClient() {
             clinicalReasoning={clinicalReasoning}
             pendingMedicationOrder={pendingMedicationOrder}
             sttChoice={sttChoice}
+            intentRoute={intentRoute}
           />
         )}
       </AnimatePresence>
@@ -7023,6 +7106,7 @@ function WorkspaceOverlay({
   clinicalReasoning,
   pendingMedicationOrder,
   sttChoice,
+  intentRoute,
 }: {
   tab: "charts" | "response" | "dialogue" | "actions" | "system";
   onTab: (t: "charts" | "response" | "dialogue" | "actions" | "system") => void;
@@ -7049,6 +7133,11 @@ function WorkspaceOverlay({
   clinicalReasoning: ClinicalReasoningResult | null;
   pendingMedicationOrder: PendingMedicationDraft | null;
   sttChoice: TranscriptChoice | null;
+  intentRoute: {
+    provider: IntentProvider;
+    latencyMs: number | null;
+    fallbackReason: string | null;
+  } | null;
 }) {
   const tabs: { id: typeof tab; label: string }[] = [
     { id: "charts", label: "Charts" },
@@ -7079,6 +7168,10 @@ function WorkspaceOverlay({
         animate={{ x: 0 }}
         exit={{ x: "100%" }}
         transition={{ type: "spring", damping: 28, stiffness: 320 }}
+        id="vital-workspace-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Clinical workspace"
         className="relative ml-auto flex h-full w-full max-w-full flex-col bg-[#F2F2EB] shadow-2xl sm:max-w-md md:max-w-lg"
       >
         <div className="flex items-center justify-between gap-2 border-b border-neutral-200/90 px-4 py-3">
@@ -7174,7 +7267,11 @@ function WorkspaceOverlay({
             </div>
           )}
           {tab === "system" && (
-            <SystemPanel systemState={systemState} sttChoice={sttChoice} />
+            <SystemPanel
+              systemState={systemState}
+              sttChoice={sttChoice}
+              intentRoute={intentRoute}
+            />
           )}
         </div>
       </motion.aside>
@@ -7887,9 +7984,15 @@ function AuditPanel({ entries }: { entries: AuditEntry[] }) {
 function SystemPanel({
   systemState,
   sttChoice,
+  intentRoute,
 }: {
   systemState: SystemState;
   sttChoice: TranscriptChoice | null;
+  intentRoute: {
+    provider: IntentProvider;
+    latencyMs: number | null;
+    fallbackReason: string | null;
+  } | null;
 }) {
   /* Reports what actually transcribed the last utterance, not what we hope did. */
   const sttValue =
@@ -7905,6 +8008,21 @@ function SystemPanel({
       ? "text-amber-400"
       : "text-clinical-teal";
 
+  /* Groq is the primary leg; Gemini answering means the primary failed.
+     Idle is stated as idle rather than guessing a provider. */
+  const brainValue =
+    intentRoute === null
+      ? "Groq primary (idle)"
+      : intentRoute.provider === "groq"
+        ? `Groq${intentRoute.latencyMs === null ? "" : ` · ${intentRoute.latencyMs} ms`}`
+        : `Gemini fallback - Groq degraded${
+            intentRoute.latencyMs === null ? "" : ` · ${intentRoute.latencyMs} ms`
+          }`;
+  const brainTone =
+    intentRoute !== null && intentRoute.provider !== "groq"
+      ? "text-amber-400"
+      : "text-clinical-cyan";
+
   const items: { label: string; value: string; tone?: string }[] = [
     {
       label: "STT",
@@ -7916,7 +8034,11 @@ function SystemPanel({
       value: "Browser SpeechSynthesis",
       tone: "text-clinical-mint",
     },
-    { label: "BRAIN", value: "Gemini · 1.5 Flash", tone: "text-clinical-cyan" },
+    {
+      label: "INTENT",
+      value: brainValue,
+      tone: brainTone,
+    },
     {
       label: "MODE",
       value: systemState.toUpperCase(),
