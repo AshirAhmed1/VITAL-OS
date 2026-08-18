@@ -20,16 +20,45 @@ export const GROQ_WHISPER_MODEL =
 /** Groq rejects uploads above 25 MB on the free tier. */
 export const GROQ_MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
+export interface GroqErrorOptions {
+  /** Overrides the status-derived default. */
+  retryable?: boolean;
+  /** Server-supplied backoff, in ms. Read by lib/llm-race.ts before it retries. */
+  retryAfterMs?: number | null;
+}
+
 export class GroqError extends Error {
   readonly status: number;
   readonly retryable: boolean;
+  readonly retryAfterMs: number | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, opts: GroqErrorOptions = {}) {
     super(message);
     this.name = "GroqError";
     this.status = status;
-    this.retryable = status === 429 || status >= 500;
+    this.retryable = opts.retryable ?? (status === 429 || status >= 500);
+    this.retryAfterMs = opts.retryAfterMs ?? null;
   }
+}
+
+/**
+ * Retry-After is either delta-seconds or an HTTP date. Honouring it keeps our
+ * backoff aligned with Groq's own rate limiter instead of guessing at it.
+ */
+function parseRetryAfter(res: Response): number | null {
+  const raw = res.headers.get("retry-after");
+  if (!raw) return null;
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000);
+  }
+
+  const at = Date.parse(raw);
+  if (Number.isFinite(at)) {
+    return Math.max(0, at - Date.now());
+  }
+  return null;
 }
 
 function groqApiKey(): string | null {
@@ -44,7 +73,11 @@ export function isGroqConfigured(): boolean {
 function requireKey(): string {
   const key = groqApiKey();
   if (!key) {
-    throw new GroqError("GROQ_API_KEY is not set on the server.", 503);
+    /* Not retryable: a missing key is a deploy problem, not an upstream blip.
+       Without this override, status 503 would earn three pointless retries. */
+    throw new GroqError("GROQ_API_KEY is not set on the server.", 503, {
+      retryable: false,
+    });
   }
   return key;
 }
@@ -95,7 +128,9 @@ export async function groqChatJson(input: GroqChatJsonInput): Promise<string> {
   });
 
   if (!res.ok) {
-    throw new GroqError(await readError(res), res.status);
+    throw new GroqError(await readError(res), res.status, {
+      retryAfterMs: parseRetryAfter(res),
+    });
   }
 
   const json = (await res.json()) as {
@@ -151,7 +186,9 @@ export async function groqTranscribe(
   });
 
   if (!res.ok) {
-    throw new GroqError(await readError(res), res.status);
+    throw new GroqError(await readError(res), res.status, {
+      retryAfterMs: parseRetryAfter(res),
+    });
   }
 
   const json = (await res.json()) as { text?: string };
