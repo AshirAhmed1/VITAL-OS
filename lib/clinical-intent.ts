@@ -375,6 +375,9 @@ export async function parseClinicalIntent(
             console.warn("[INTENT PARSE] provider demoted", record);
           }
         },
+        onRetry: (record) => {
+          console.warn("[INTENT PARSE] transient failure, retrying", record);
+        },
       }
     );
 
