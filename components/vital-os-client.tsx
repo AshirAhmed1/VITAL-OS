@@ -58,6 +58,7 @@ import {
 import type { ConversationTurn } from "@/lib/vital-llm";
 import type { ClinicalReasoningResult } from "@/lib/clinical-reasoning";
 import type { ClinicalCommandResponse } from "@/app/api/clinical-command/route";
+import type { IntentProvider } from "@/lib/clinical-intent";
 import type { DemoMedication, DemoPatient } from "@/lib/demo-patients";
 import { patientToSnapshot } from "@/lib/demo-patients";
 import {
@@ -2851,6 +2852,14 @@ export default function VitalOsClient() {
   /* Drives the amber dot on the workspace toggle: the degrade has to be
      visible without opening the panel, or it is not really visible. */
   const sttDegraded = sttChoice !== null && sttChoice.degradedReason !== null;
+
+  /* Which leg of the intent chain answered last. Reported, never assumed —
+     two silent model deprecations were missed because the panel was a literal. */
+  const [intentRoute, setIntentRoute] = React.useState<{
+    provider: IntentProvider;
+    latencyMs: number | null;
+    fallbackReason: string | null;
+  } | null>(null);
   const shouldSubmitOnEndRef = React.useRef(false);
   /** True between `onstart` and `onend` — prevents double `start()` (InvalidStateError). */
   const recognitionActiveRef = React.useRef(false);
@@ -3715,6 +3724,16 @@ export default function VitalOsClient() {
       data: ClinicalCommandResponse
     ): Promise<boolean> => {
       const { action, assistantResponse, parsedIntent } = data;
+
+      /* Recorded before the unknown-intent bail: a parse that came back
+         unknown still tells us which provider produced it. */
+      if (parsedIntent.provider) {
+        setIntentRoute({
+          provider: parsedIntent.provider,
+          latencyMs: parsedIntent.parseLatencyMs ?? null,
+          fallbackReason: parsedIntent.fallbackReason ?? null,
+        });
+      }
 
       if (action?.type === "unknown" || parsedIntent.intent === "unknown") {
         return false;
@@ -6746,6 +6765,7 @@ export default function VitalOsClient() {
             clinicalReasoning={clinicalReasoning}
             pendingMedicationOrder={pendingMedicationOrder}
             sttChoice={sttChoice}
+            intentRoute={intentRoute}
           />
         )}
       </AnimatePresence>
@@ -7086,6 +7106,7 @@ function WorkspaceOverlay({
   clinicalReasoning,
   pendingMedicationOrder,
   sttChoice,
+  intentRoute,
 }: {
   tab: "charts" | "response" | "dialogue" | "actions" | "system";
   onTab: (t: "charts" | "response" | "dialogue" | "actions" | "system") => void;
@@ -7112,6 +7133,11 @@ function WorkspaceOverlay({
   clinicalReasoning: ClinicalReasoningResult | null;
   pendingMedicationOrder: PendingMedicationDraft | null;
   sttChoice: TranscriptChoice | null;
+  intentRoute: {
+    provider: IntentProvider;
+    latencyMs: number | null;
+    fallbackReason: string | null;
+  } | null;
 }) {
   const tabs: { id: typeof tab; label: string }[] = [
     { id: "charts", label: "Charts" },
@@ -7241,7 +7267,11 @@ function WorkspaceOverlay({
             </div>
           )}
           {tab === "system" && (
-            <SystemPanel systemState={systemState} sttChoice={sttChoice} />
+            <SystemPanel
+              systemState={systemState}
+              sttChoice={sttChoice}
+              intentRoute={intentRoute}
+            />
           )}
         </div>
       </motion.aside>
@@ -7954,9 +7984,15 @@ function AuditPanel({ entries }: { entries: AuditEntry[] }) {
 function SystemPanel({
   systemState,
   sttChoice,
+  intentRoute,
 }: {
   systemState: SystemState;
   sttChoice: TranscriptChoice | null;
+  intentRoute: {
+    provider: IntentProvider;
+    latencyMs: number | null;
+    fallbackReason: string | null;
+  } | null;
 }) {
   /* Reports what actually transcribed the last utterance, not what we hope did. */
   const sttValue =
@@ -7972,6 +8008,21 @@ function SystemPanel({
       ? "text-amber-400"
       : "text-clinical-teal";
 
+  /* Groq is the primary leg; Gemini answering means the primary failed.
+     Idle is stated as idle rather than guessing a provider. */
+  const brainValue =
+    intentRoute === null
+      ? "Groq primary (idle)"
+      : intentRoute.provider === "groq"
+        ? `Groq${intentRoute.latencyMs === null ? "" : ` · ${intentRoute.latencyMs} ms`}`
+        : `Gemini fallback - Groq degraded${
+            intentRoute.latencyMs === null ? "" : ` · ${intentRoute.latencyMs} ms`
+          }`;
+  const brainTone =
+    intentRoute !== null && intentRoute.provider !== "groq"
+      ? "text-amber-400"
+      : "text-clinical-cyan";
+
   const items: { label: string; value: string; tone?: string }[] = [
     {
       label: "STT",
@@ -7983,7 +8034,11 @@ function SystemPanel({
       value: "Browser SpeechSynthesis",
       tone: "text-clinical-mint",
     },
-    { label: "BRAIN", value: "Gemini · 1.5 Flash", tone: "text-clinical-cyan" },
+    {
+      label: "INTENT",
+      value: brainValue,
+      tone: brainTone,
+    },
     {
       label: "MODE",
       value: systemState.toUpperCase(),
