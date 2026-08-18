@@ -11,7 +11,7 @@ const GROQ_BASE_URL =
 
 /** Fast instruction-following model for transcript -> JSON intent parsing. */
 export const GROQ_INTENT_MODEL =
-  process.env.GROQ_INTENT_MODEL?.trim() || "llama-3.3-70b-versatile";
+  process.env.GROQ_INTENT_MODEL?.trim() || "openai/gpt-oss-120b";
 
 /** Whisper on Groq's LPUs — real-time-ish STT for the voice path. */
 export const GROQ_WHISPER_MODEL =
