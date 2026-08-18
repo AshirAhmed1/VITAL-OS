@@ -155,6 +155,9 @@ export async function POST(req: Request) {
             console.warn("[TRANSCRIBE] provider demoted", record);
           }
         },
+        onRetry: (record) => {
+          console.warn("[TRANSCRIBE] transient failure, retrying", record);
+        },
       }
     );
 
