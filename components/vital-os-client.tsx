@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   BarChart3,
   BookText,
-  Check,
   ChevronRight,
   CircleDashed,
   CircleDot,
@@ -39,6 +38,18 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  EditableAllergyTable,
+  EditableMedicationTable,
+  EditableNoteList,
+  EditableProblemTable,
+  EditableStringList,
+  InlineField,
+  InlineSelect,
+  joinRiskFlags,
+  notesFromPatient,
+  splitRiskFlags,
+} from "@/components/chart-inline-edit";
 import { ThemeAppearanceControl } from "@/components/theme-appearance-control";
 import {
   VoiceHeroVisual,
@@ -426,7 +437,7 @@ async function persistPatientPatch(
   patientId: string,
   patch: Record<string, unknown>,
   role: VitalRole
-): Promise<boolean> {
+): Promise<{ ok: boolean; error?: string; patient?: DemoPatient }> {
   const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}`, {
     method: "PATCH",
     headers: {
@@ -435,12 +446,20 @@ async function persistPatientPatch(
     },
     body: JSON.stringify(patch),
   });
-  if (res.ok) return true;
+  const body = (await res.json().catch(() => ({}))) as {
+    patient?: DemoPatient;
+    error?: string;
+  };
+  if (res.ok) {
+    return { ok: true, patient: body.patient };
+  }
   if (process.env.NODE_ENV === "development") {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
     console.warn("Patient patch failed:", body.error ?? res.status);
   }
-  return false;
+  return {
+    ok: false,
+    error: body.error?.trim() || `Unable to save (HTTP ${res.status})`,
+  };
 }
 
 function requiresDoctorRole(intent: PatientCommandIntent): boolean {
@@ -2758,6 +2777,7 @@ export default function VitalOsClient() {
   >({});
   const [problemStatusFlashId, setProblemStatusFlashId] = React.useState<string | null>(null);
   const [orderNotice, setOrderNotice] = React.useState<string | null>(null);
+  const [chartSaveError, setChartSaveError] = React.useState<string | null>(null);
   const [openPatientTabIds, setOpenPatientTabIds] = React.useState<string[]>([]);
   const [dischargeConfirmId, setDischargeConfirmId] = React.useState<string | null>(null);
   const [dischargeWorkflow, setDischargeWorkflow] = React.useState<{
@@ -2906,6 +2926,45 @@ export default function VitalOsClient() {
       /* ignore — roster is best-effort until server is up */
     }
   }, []);
+
+  const commitChartPatch = React.useCallback(
+    async (
+      patientId: string,
+      patch: Record<string, unknown>,
+      optimistic: Partial<DemoPatient>
+    ) => {
+      if (!permissions.canEditPatientStatus) {
+        setChartSaveError(ACCESS_RESTRICTED_MESSAGE);
+        return;
+      }
+      let snapshot: DemoPatient | undefined;
+      setPatients((prev) => {
+        snapshot = prev.find((p) => p.id === patientId);
+        return prev.map((p) =>
+          p.id === patientId ? { ...p, ...optimistic } : p
+        );
+      });
+      const result = await persistPatientPatch(patientId, patch, apiRole);
+      if (!result.ok) {
+        if (snapshot) {
+          const rolled = snapshot;
+          setPatients((prev) =>
+            prev.map((p) => (p.id === patientId ? rolled : p))
+          );
+        }
+        setChartSaveError(result.error ?? "Unable to save chart changes.");
+        return;
+      }
+      setChartSaveError(null);
+      if (result.patient) {
+        const saved = result.patient;
+        setPatients((prev) =>
+          prev.map((p) => (p.id === patientId ? saved : p))
+        );
+      }
+    },
+    [apiRole, permissions.canEditPatientStatus]
+  );
 
   React.useEffect(() => {
     void refreshPatients();
@@ -3077,6 +3136,12 @@ export default function VitalOsClient() {
     const timer = globalThis.setTimeout(() => setOrderNotice(null), 2600);
     return () => globalThis.clearTimeout(timer);
   }, [orderNotice]);
+
+  React.useEffect(() => {
+    if (!chartSaveError) return;
+    const timer = globalThis.setTimeout(() => setChartSaveError(null), 5000);
+    return () => globalThis.clearTimeout(timer);
+  }, [chartSaveError]);
 
   /* feature detection */
   React.useEffect(() => {
@@ -3997,7 +4062,7 @@ export default function VitalOsClient() {
             pushLocalAssistantResponse(command, "There is no recent change to undo.");
             return true;
           }
-          const ok = await persistPatientPatch(snap.patientId, snap.patch, apiRole);
+          const { ok } = await persistPatientPatch(snap.patientId, snap.patch, apiRole);
           lastUndoRef.current = null;
           if (!ok) {
             pushLocalAssistantResponse(command, "Undo failed. Try again.");
@@ -4125,7 +4190,7 @@ export default function VitalOsClient() {
           );
           if (result) {
             if (Object.keys(result.patch).length > 0) {
-              const ok = await persistPatientPatch(
+              const { ok } = await persistPatientPatch(
                 targetPatient.id,
                 result.patch,
                 apiRole
@@ -4619,7 +4684,7 @@ export default function VitalOsClient() {
           role === "doctor" && user?.userName
             ? formatDoctorDisplayName(user.userName)
             : user?.userName ?? "Provider";
-        const ok = await persistPatientPatch(
+        const { ok } = await persistPatientPatch(
           patientId,
           {
             discharge: true,
@@ -5355,6 +5420,16 @@ export default function VitalOsClient() {
             className="fixed right-4 top-4 z-50 rounded-lg border border-border bg-card px-3 py-2 text-xs font-medium text-foreground"
           >
             {orderNotice}
+          </motion.div>
+        )}
+        {chartSaveError && (
+          <motion.div
+            initial={{ opacity: 0, y: -8, x: 12 }}
+            animate={{ opacity: 1, y: 0, x: 0 }}
+            exit={{ opacity: 0, y: -8, x: 12 }}
+            className="fixed right-4 top-16 z-50 max-w-sm rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200"
+          >
+            {chartSaveError}
           </motion.div>
         )}
       </AnimatePresence>
@@ -6267,7 +6342,8 @@ export default function VitalOsClient() {
           )}
 
           {activePatient && (
-            <div className="mb-3 grid grid-cols-2 gap-2 vital-card p-3 lg:grid-cols-7">
+            <div className="mb-3 vital-card p-3">
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-8">
               <div>
                 <p className="text-[11px] uppercase text-muted-foreground">Patient</p>
                 <p className="text-sm font-semibold text-foreground">{activePatient.name}</p>
@@ -6278,26 +6354,107 @@ export default function VitalOsClient() {
               </div>
               <div>
                 <p className="text-[11px] uppercase text-muted-foreground">Age/Sex</p>
-                <p className="text-sm font-semibold text-foreground">
-                  {activePatient.age}
-                  {activePatient.sex}
-                </p>
+                <div className="flex items-center gap-1">
+                  <InlineField
+                    value={String(activePatient.age || "")}
+                    displayValue={String(activePatient.age || "—")}
+                    type="number"
+                    disabled={!permissions.canEditPatientStatus}
+                    className="w-12 font-semibold"
+                    onCommit={(raw) => {
+                      const age = Number(raw);
+                      if (!raw.trim() || !Number.isFinite(age) || age < 0) return;
+                      void commitChartPatch(
+                        activePatient.id,
+                        { age },
+                        { age }
+                      );
+                    }}
+                  />
+                  <InlineSelect
+                    value={activePatient.sex || "U"}
+                    options={["M", "F", "U"]}
+                    disabled={!permissions.canEditPatientStatus}
+                    className="w-14 font-semibold"
+                    onCommit={(sex) => {
+                      void commitChartPatch(activePatient.id, { sex }, { sex });
+                    }}
+                  />
+                </div>
               </div>
               <div>
                 <p className="text-[11px] uppercase text-muted-foreground">DOB</p>
-                <p className="text-sm font-semibold text-foreground">{activePatient.dob}</p>
+                <InlineField
+                  value={/^\d{4}-\d{2}-\d{2}/.test(activePatient.dob) ? activePatient.dob.slice(0, 10) : ""}
+                  displayValue={activePatient.dob}
+                  type="date"
+                  disabled={!permissions.canEditPatientStatus}
+                  className="font-semibold"
+                  onCommit={(dob) => {
+                    void commitChartPatch(activePatient.id, { dob }, { dob: dob || "Not listed" });
+                  }}
+                />
               </div>
               <div>
                 <p className="text-[11px] uppercase text-muted-foreground">Blood</p>
-                <p className="text-sm font-semibold text-foreground">{activePatient.bloodType || "—"}</p>
+                <InlineField
+                  value={activePatient.bloodType || ""}
+                  displayValue={activePatient.bloodType || "—"}
+                  disabled={!permissions.canEditPatientStatus}
+                  className="font-semibold"
+                  onCommit={(bloodType) => {
+                    void commitChartPatch(
+                      activePatient.id,
+                      { bloodType },
+                      { bloodType }
+                    );
+                  }}
+                />
               </div>
               <div>
                 <p className="text-[11px] uppercase text-muted-foreground">Provider</p>
-                <p className="text-sm font-semibold text-foreground">{activePatient.pcp ?? "Unassigned"}</p>
+                <InlineField
+                  value={activePatient.pcp ?? ""}
+                  displayValue={activePatient.pcp ?? "Unassigned"}
+                  disabled={!permissions.canEditPatientStatus}
+                  className="font-semibold"
+                  onCommit={(pcp) => {
+                    void commitChartPatch(activePatient.id, { pcp }, { pcp });
+                  }}
+                />
+              </div>
+              <div>
+                <p className="text-[11px] uppercase text-muted-foreground">Room</p>
+                <InlineField
+                  value={activePatient.room || ""}
+                  displayValue={activePatient.room || "Unassigned"}
+                  disabled={!permissions.canEditPatientStatus}
+                  className="font-semibold"
+                  onCommit={(room) => {
+                    void commitChartPatch(activePatient.id, { room }, { room });
+                  }}
+                />
               </div>
               <div>
                 <p className="text-[11px] uppercase text-muted-foreground">Last Visit</p>
                 <p className="text-sm font-semibold text-foreground">{activePatient.lastVisit}</p>
+              </div>
+              </div>
+              <div className="mt-2 border-t border-border pt-2">
+                <p className="text-[11px] uppercase text-muted-foreground">Chief concern</p>
+                <InlineField
+                  value={activePatient.chiefConcern || ""}
+                  displayValue={activePatient.chiefConcern || "Not specified"}
+                  disabled={!permissions.canEditPatientStatus}
+                  className="font-semibold"
+                  onCommit={(chiefConcern) => {
+                    void commitChartPatch(
+                      activePatient.id,
+                      { chiefConcern },
+                      { chiefConcern }
+                    );
+                  }}
+                />
               </div>
             </div>
           )}
@@ -6322,31 +6479,21 @@ export default function VitalOsClient() {
                   {activeAllergies.length ? `${activeAllergies.length} total` : "None listed"}
                 </Badge>
               </div>
-              <div className="rounded-xl border border-border">
-                <div className="grid grid-cols-[1.5fr_1fr_1fr] border-b border-border bg-muted px-2 py-1 text-[11px] font-semibold text-foreground">
-                  <span>Allergen</span>
-                  <span>Reaction</span>
-                  <span>Severity</span>
-                </div>
-                {activeAllergies.slice(0, 5).map((a, i) => {
-                  const [namePart, reactionPart] = a.split("—").map((s) => s.trim());
-                  const severity = /anaphylaxis|severe/i.test(a)
-                    ? "Severe"
-                    : /rash|hives|swelling/i.test(a)
-                      ? "Moderate"
-                      : "Mild";
-                  return (
-                    <div
-                      key={`all-${i}`}
-                      className="grid grid-cols-[1.5fr_1fr_1fr] border-b border-border px-2 py-1.5 text-sm last:border-b-0"
-                    >
-                      <span className="font-medium text-foreground">{namePart || a}</span>
-                      <span className="text-foreground">{reactionPart || "Noted"}</span>
-                      <span className="text-foreground">{severity}</span>
-                    </div>
+              <EditableAllergyTable
+                allergies={activeAllergies}
+                canEdit={permissions.canEditPatientStatus}
+                onSave={(next) => {
+                  void commitChartPatch(
+                    activePatient.id,
+                    { allergies: next },
+                    {
+                      allergies: next.map(
+                        (row) => `${row.allergen} — ${row.reaction} — ${row.severity}`
+                      ),
+                    }
                   );
-                })}
-              </div>
+                }}
+              />
             </div>
             )}
 
@@ -6358,23 +6505,24 @@ export default function VitalOsClient() {
                   {activeMeds.length ? `${activeMeds.length} active` : "None listed"}
                 </Badge>
               </div>
-              <div className="rounded-xl border border-border">
-                <div className="grid grid-cols-[1.6fr_1.2fr_1fr] border-b border-border bg-muted px-2 py-1 text-[11px] font-semibold text-foreground">
-                  <span>Medication</span>
-                  <span>Dose / Frequency</span>
-                  <span>Indication</span>
-                </div>
-                {activeMeds.slice(0, 5).map((m, i) => (
-                  <div
-                    key={`med-${i}`}
-                    className="grid grid-cols-[1.6fr_1.2fr_1fr] border-b border-border px-2 py-1.5 text-sm last:border-b-0"
-                  >
-                    <span className="font-medium text-foreground">{m.name}</span>
-                    <span className="text-foreground">{m.sig}</span>
-                    <span className="text-foreground">Active</span>
-                  </div>
-                ))}
-              </div>
+              <EditableMedicationTable
+                medications={activeMeds}
+                canEdit={permissions.canEditPatientStatus}
+                onSave={(next) => {
+                  void commitChartPatch(
+                    activePatient.id,
+                    {
+                      medications: next.map((m) => ({
+                        name: m.name,
+                        dose: m.sig,
+                        sig: m.sig,
+                        status: m.status || "Active",
+                      })),
+                    },
+                    { medications: next }
+                  );
+                }}
+              />
             </div>
             )}
 
@@ -6386,83 +6534,28 @@ export default function VitalOsClient() {
                   {activeProblems.length ? `${activeProblemCount} active` : "None listed"}
                 </Badge>
               </div>
-              <div className="rounded-xl border border-border">
-                <div className="grid grid-cols-[2fr_1fr_1fr] border-b border-border bg-muted px-2 py-1 text-[11px] font-semibold text-foreground">
-                  <span>Problem</span>
-                  <span>Status</span>
-                  <span>Since</span>
-                </div>
-                <AnimatePresence initial={false}>
-                  {activeProblemRows.slice(0, 5).map(({ id, name, status, since }, i) => (
-                    <motion.div
-                      key={`${id}-${status}-${i}`}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      transition={{ duration: 0.2 }}
-                      className="grid grid-cols-[2fr_1fr_1fr] border-b border-border px-2 py-1.5 text-sm last:border-b-0"
-                    >
-                      <span className="font-medium text-foreground">{name}</span>
-                      <motion.div className="flex flex-wrap items-center gap-1">
-                        {permissions.canEditPatientStatus ? (
-                          <select
-                            value={status}
-                            onChange={(e) => {
-                              if (!activePatient) return;
-                              const nextStatus = e.target.value as ProblemStatus;
-                              const updatedProblems = (
-                                problemStateByPatient[activePatient.id] ?? []
-                              ).map((item) =>
-                                item.id === id ? { ...item, status: nextStatus } : item
-                              );
-                              setProblemStateByPatient((prev) => ({
-                                ...prev,
-                                [activePatient.id]: updatedProblems,
-                              }));
-                              setProblemStatusFlashId(`${id}-${nextStatus}`);
-                              void persistPatientProblems(
-                                activePatient.id,
-                                updatedProblems,
-                                apiRole
-                              ).then((ok) => {
-                                if (ok) void refreshPatients();
-                              });
-                            }}
-                            className="h-7 rounded-md border border-border bg-card px-1 text-[10px] text-foreground"
-                          >
-                            {PROBLEM_STATUS_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="text-xs font-medium text-foreground">{status}</span>
-                        )}
-                        <Badge
-                          variant={problemStatusBadgeVariant(status)}
-                          className="w-fit text-[10px] transition-all duration-300"
-                        >
-                          {status}
-                        </Badge>
-                        <AnimatePresence>
-                          {problemStatusFlashId === `${id}-${status}` && (
-                            <motion.span
-                              key={`${id}-${status}-check`}
-                              initial={{ scale: 0, opacity: 0 }}
-                              animate={{ scale: 1, opacity: 1 }}
-                              exit={{ scale: 0, opacity: 0 }}
-                            >
-                              <Check className="h-3.5 w-3.5 text-clinical-teal" />
-                            </motion.span>
-                          )}
-                        </AnimatePresence>
-                      </motion.div>
-                      <span className="text-foreground">{since}</span>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
+              <EditableProblemTable
+                problems={
+                  activePatient.problems?.length
+                    ? activePatient.problems
+                    : activeProblemRows.map(({ name, status, since }) => ({
+                        name,
+                        status,
+                        since,
+                      }))
+                }
+                canEdit={permissions.canEditPatientStatus}
+                onSave={(next) => {
+                  void commitChartPatch(
+                    activePatient.id,
+                    { problems: next },
+                    {
+                      problems: next,
+                      diagnoses: next.map((p) => p.name),
+                    }
+                  );
+                }}
+              />
             </div>
             )}
 
@@ -6471,20 +6564,40 @@ export default function VitalOsClient() {
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-sm font-semibold text-foreground">Recent Notes / Vitals</p>
                 <Badge variant="notes" className="text-xs">
-                  {activeVitals.length ? "Live" : "None listed"}
+                  {notesFromPatient(activePatient).length
+                    ? `${notesFromPatient(activePatient).length} notes`
+                    : "None listed"}
                 </Badge>
               </div>
-              <div className="grid grid-cols-2 gap-1 text-sm">
-                {activeVitals.slice(0, 6).map(([k, v]) => (
-                  <div key={k} className="rounded-lg bg-muted px-2 py-1.5">
-                    <span className="mr-1 text-muted-foreground">{k}</span>
-                    <span className="font-medium text-foreground">{v}</span>
-                  </div>
-                ))}
-                <motion.div className="col-span-2 rounded-lg bg-muted px-2 py-1.5 text-xs text-foreground">
-                  {activePatient?.chartNote || "No recent notes"}
-                </motion.div>
-              </div>
+              {activeVitals.length > 0 && (
+                <div className="mb-2 grid grid-cols-2 gap-1 text-sm">
+                  {activeVitals.slice(0, 6).map(([k, v]) => (
+                    <div key={k} className="rounded-lg bg-muted px-2 py-1.5">
+                      <span className="mr-1 text-muted-foreground">{k}</span>
+                      <span className="font-medium text-foreground">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <EditableNoteList
+                notes={notesFromPatient(activePatient)}
+                canEdit={permissions.canEditPatientStatus}
+                noteProvider={
+                  role === "doctor" && user?.userName
+                    ? formatDoctorDisplayName(user.userName)
+                    : user?.userName ?? "Chart"
+                }
+                onSave={(chartNotes) => {
+                  void commitChartPatch(
+                    activePatient.id,
+                    { chartNotes },
+                    {
+                      chartNotes,
+                      chartNote: chartNotes.map((n) => n.text).join(" "),
+                    }
+                  );
+                }}
+              />
             </motion.div>
             )}
           </div>
@@ -6497,17 +6610,129 @@ export default function VitalOsClient() {
                 <Phone className="h-4 w-4 text-blue-500" />
                 Emergency Contact
               </p>
-              <p className="mt-1 text-sm text-foreground">
-                {activePatient.emergencyContact?.name || "Not listed"} (
-                {activePatient.emergencyContact?.relationship || "Not listed"})
-              </p>
+              <div className="mt-1 space-y-1">
+                <InlineField
+                  value={activePatient.emergencyContact?.name || ""}
+                  displayValue={activePatient.emergencyContact?.name || "Not listed"}
+                  placeholder="Name"
+                  disabled={!permissions.canEditPatientStatus}
+                  onCommit={(name) => {
+                    const emergencyContact = {
+                      ...activePatient.emergencyContact,
+                      name: name || "Not listed",
+                    };
+                    void commitChartPatch(
+                      activePatient.id,
+                      { emergencyContact },
+                      { emergencyContact }
+                    );
+                  }}
+                />
+                <InlineField
+                  value={activePatient.emergencyContact?.relationship || ""}
+                  displayValue={
+                    activePatient.emergencyContact?.relationship || "Not listed"
+                  }
+                  placeholder="Relationship"
+                  disabled={!permissions.canEditPatientStatus}
+                  onCommit={(relationship) => {
+                    const emergencyContact = {
+                      ...activePatient.emergencyContact,
+                      relationship: relationship || "Not listed",
+                    };
+                    void commitChartPatch(
+                      activePatient.id,
+                      { emergencyContact },
+                      { emergencyContact }
+                    );
+                  }}
+                />
+                <InlineField
+                  value={
+                    /^not listed$/i.test(activePatient.emergencyContact?.phone ?? "")
+                      ? ""
+                      : activePatient.emergencyContact?.phone || ""
+                  }
+                  displayValue={activePatient.emergencyContact?.phone || "Not listed"}
+                  placeholder="Phone"
+                  disabled={!permissions.canEditPatientStatus}
+                  onCommit={(phone) => {
+                    const nextPhone = phone || "Not listed";
+                    const emergencyContact = {
+                      ...activePatient.emergencyContact,
+                      phone: nextPhone,
+                    };
+                    void commitChartPatch(
+                      activePatient.id,
+                      { emergencyContact, primaryContactLine: phone },
+                      { emergencyContact }
+                    );
+                  }}
+                />
+              </div>
             </div>
             <div className="vital-card border-l-4 border-l-amber-400 px-3 py-2">
               <p className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
                 <Phone className="h-4 w-4 text-blue-500" />
-                {activePatient.emergencyContact?.phone || "Not listed"}
+                Primary contact line
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">Primary contact line</p>
+              <div className="mt-1">
+                <InlineField
+                  value={
+                    /^not listed$/i.test(activePatient.emergencyContact?.phone ?? "")
+                      ? ""
+                      : activePatient.emergencyContact?.phone || ""
+                  }
+                  displayValue={activePatient.emergencyContact?.phone || "Not listed"}
+                  placeholder="Phone"
+                  disabled={!permissions.canEditPatientStatus}
+                  onCommit={(phone) => {
+                    void commitChartPatch(
+                      activePatient.id,
+                      { primaryContactLine: phone },
+                      {
+                        emergencyContact: {
+                          ...activePatient.emergencyContact,
+                          phone: phone || "Not listed",
+                        },
+                      }
+                    );
+                  }}
+                />
+              </div>
+            </div>
+            <div className="vital-card border-l-4 border-l-emerald-500 px-3 py-2">
+              <p className="text-sm font-medium text-foreground">Care Team</p>
+              <EditableStringList
+                items={activePatient.careTeam ?? []}
+                canEdit={permissions.canEditPatientStatus}
+                addLabel="+ Add team member"
+                placeholder="Role or name"
+                onSave={(careTeam) => {
+                  void commitChartPatch(
+                    activePatient.id,
+                    { careTeam },
+                    { careTeam }
+                  );
+                }}
+              />
+            </div>
+            <div className="vital-card border-l-4 border-l-amber-500 px-3 py-2">
+              <p className="text-sm font-medium text-foreground">Risk Flags</p>
+              <EditableStringList
+                items={splitRiskFlags(activePatient.riskFlags)}
+                canEdit={permissions.canEditPatientStatus}
+                addLabel="+ Add risk flag"
+                placeholder="Risk flag"
+                onSave={(items) => {
+                  const riskFlags = joinRiskFlags(items);
+                  void commitChartPatch(
+                    activePatient.id,
+                    { riskFlags },
+                    { riskFlags }
+                  );
+                }}
+              />
             </div>
           </div>
           )}
@@ -6653,7 +6878,14 @@ export default function VitalOsClient() {
               ["Allergies", `${activeAllergies.length || 0} total`, "allergies", "border-l-rose-400"],
               ["Medications", `${activeMeds.length || 0} active`, "medications", "border-l-sky-500"],
               ["Problems", `${activeProblems.length || 0} active`, "diagnoses", "border-l-amber-400"],
-              ["Recent Notes", activePatient?.chartNote ? "1 recent" : "None listed", "vitals", "border-l-slate-400"],
+              [
+                "Recent Notes",
+                notesFromPatient(activePatient).length
+                  ? `${notesFromPatient(activePatient).length} notes`
+                  : "None listed",
+                "vitals",
+                "border-l-slate-400",
+              ],
               ["Emergency Contact", activePatient?.emergencyContact?.name ? "1 contact" : "None listed", "plan", "border-l-sky-400"],
               ["Care Team", `${activePatient?.careTeam?.length ?? 0} listed`, "plan", "border-l-emerald-500"],
               ["Risk Flags", activePatient?.riskFlags ? "1 flag" : "None listed", "plan", "border-l-amber-500"],
@@ -6708,18 +6940,128 @@ export default function VitalOsClient() {
             ))}
             <div className="vital-card p-3">
               <p className="text-sm font-semibold text-foreground">Notes</p>
-              <p className="mt-1 text-sm text-foreground">
-                {activePatient?.chartNote || "No notes yet"}
-              </p>
+              <div className="mt-1">
+                <EditableNoteList
+                  notes={notesFromPatient(activePatient)}
+                  canEdit={permissions.canEditPatientStatus}
+                  addLabel="+ Add note"
+                  noteProvider={
+                    role === "doctor" && user?.userName
+                      ? formatDoctorDisplayName(user.userName)
+                      : user?.userName ?? "Chart"
+                  }
+                  onSave={(chartNotes) => {
+                    void commitChartPatch(
+                      activePatient.id,
+                      { chartNotes },
+                      {
+                        chartNotes,
+                        chartNote: chartNotes.map((n) => n.text).join(" "),
+                      }
+                    );
+                  }}
+                />
+              </div>
             </div>
             <div className="vital-card p-3">
               <p className="text-sm font-semibold text-foreground">Emergency Contact</p>
-              <p className="mt-2 inline-flex items-center gap-2 text-sm text-foreground">
-                <Phone className="h-4 w-4 text-blue-500" />
-                {activePatient?.social?.includes("daughter")
-                  ? "(555) 123-4567"
-                  : "On file in patient chart"}
-              </p>
+              <div className="mt-2 space-y-1">
+                <InlineField
+                  value={activePatient.emergencyContact?.name || ""}
+                  displayValue={activePatient.emergencyContact?.name || "Not listed"}
+                  placeholder="Name"
+                  disabled={!permissions.canEditPatientStatus}
+                  onCommit={(name) => {
+                    const emergencyContact = {
+                      ...activePatient.emergencyContact,
+                      name: name || "Not listed",
+                    };
+                    void commitChartPatch(
+                      activePatient.id,
+                      { emergencyContact },
+                      { emergencyContact }
+                    );
+                  }}
+                />
+                <InlineField
+                  value={activePatient.emergencyContact?.relationship || ""}
+                  displayValue={
+                    activePatient.emergencyContact?.relationship || "Not listed"
+                  }
+                  placeholder="Relationship"
+                  disabled={!permissions.canEditPatientStatus}
+                  onCommit={(relationship) => {
+                    const emergencyContact = {
+                      ...activePatient.emergencyContact,
+                      relationship: relationship || "Not listed",
+                    };
+                    void commitChartPatch(
+                      activePatient.id,
+                      { emergencyContact },
+                      { emergencyContact }
+                    );
+                  }}
+                />
+                <p className="inline-flex w-full items-center gap-2 text-sm text-foreground">
+                  <Phone className="h-4 w-4 shrink-0 text-blue-500" />
+                  <InlineField
+                    value={
+                      /^not listed$/i.test(activePatient.emergencyContact?.phone ?? "")
+                        ? ""
+                        : activePatient.emergencyContact?.phone || ""
+                    }
+                    displayValue={activePatient.emergencyContact?.phone || "Not listed"}
+                    placeholder="Phone"
+                    disabled={!permissions.canEditPatientStatus}
+                    onCommit={(phone) => {
+                      const nextPhone = phone || "Not listed";
+                      void commitChartPatch(
+                        activePatient.id,
+                        {
+                          emergencyContact: {
+                            ...activePatient.emergencyContact,
+                            phone: nextPhone,
+                          },
+                          primaryContactLine: phone,
+                        },
+                        {
+                          emergencyContact: {
+                            ...activePatient.emergencyContact,
+                            phone: nextPhone,
+                          },
+                        }
+                      );
+                    }}
+                  />
+                </p>
+              </div>
+            </div>
+            <div className="vital-card p-3">
+              <p className="text-sm font-semibold text-foreground">Care Team</p>
+              <EditableStringList
+                items={activePatient.careTeam ?? []}
+                canEdit={permissions.canEditPatientStatus}
+                addLabel="+ Add team member"
+                onSave={(careTeam) => {
+                  void commitChartPatch(activePatient.id, { careTeam }, { careTeam });
+                }}
+              />
+            </div>
+            <div className="vital-card p-3">
+              <p className="text-sm font-semibold text-foreground">Risk Flags</p>
+              <EditableStringList
+                items={splitRiskFlags(activePatient.riskFlags)}
+                canEdit={permissions.canEditPatientStatus}
+                addLabel="+ Add risk flag"
+                onSave={(items) => {
+                  const riskFlags = joinRiskFlags(items);
+                  void commitChartPatch(
+                    activePatient.id,
+                    { riskFlags },
+                    { riskFlags }
+                  );
+                }}
+              />
             </div>
           </div>
           )}

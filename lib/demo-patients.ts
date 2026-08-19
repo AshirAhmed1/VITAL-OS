@@ -3,6 +3,7 @@
 export type DemoMedication = {
   name: string;
   sig: string;
+  status?: string;
 };
 
 export type PatientProblem = {

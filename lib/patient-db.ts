@@ -22,6 +22,9 @@ export type DbEmergencyContact = {
   name: string;
   relationship: string;
   phone: string;
+  /** Optional extras persisted on the existing jsonb object (no new columns). */
+  care_team?: string[] | null;
+  risk_flags?: string | null;
 };
 
 export type DbChartNote = {
@@ -117,9 +120,7 @@ function allergiesToDb(allergies: unknown): DbAllergy[] {
 function allergiesFromDb(allergies: DbAllergy[] | null | undefined): string[] {
   if (!allergies?.length) return [];
   return allergies.map((a) =>
-    a.reaction && a.reaction !== "Noted"
-      ? `${a.allergen} — ${a.reaction}`
-      : a.allergen
+    [a.allergen, a.reaction || "Noted", a.severity || "Mild"].join(" — ")
   );
 }
 
@@ -149,6 +150,7 @@ function medicationsFromDb(
   return medications.map((m) => ({
     name: m.name,
     sig: m.dose || "sig not specified",
+    status: m.status || "Active",
   }));
 }
 
@@ -241,23 +243,66 @@ function chartNotesToDb(notes: unknown): DbChartNote[] {
   return out;
 }
 
+function careTeamFromUnknown(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item).trim()).filter(Boolean);
+}
+
+function extrasFromEmergencyContact(contact: unknown): {
+  care_team?: string[];
+  risk_flags?: string;
+} {
+  if (!contact || typeof contact !== "object") return {};
+  const o = contact as Record<string, unknown>;
+  const extras: { care_team?: string[]; risk_flags?: string } = {};
+  const team = careTeamFromUnknown(o.care_team);
+  if (team.length) extras.care_team = team;
+  if (typeof o.risk_flags === "string" && o.risk_flags.trim()) {
+    extras.risk_flags = o.risk_flags.trim();
+  }
+  return extras;
+}
+
 function emergencyContactToDb(
   contact: unknown,
-  primaryLine?: string | null
+  primaryLine?: string | null,
+  extras?: { careTeam?: string[]; riskFlags?: string | null }
 ): DbEmergencyContact {
-  if (contact && typeof contact === "object") {
-    const o = contact as Record<string, unknown>;
-    return {
-      name: String(o.name ?? "Not listed").trim() || "Not listed",
-      relationship:
-        String(o.relationship ?? "Not listed").trim() || "Not listed",
-      phone: String(o.phone ?? primaryLine ?? "Not listed").trim() || "Not listed",
-    };
-  }
+  const fromContact = extrasFromEmergencyContact(contact);
+  const careTeam =
+    extras?.careTeam !== undefined
+      ? extras.careTeam.map((s) => s.trim()).filter(Boolean)
+      : fromContact.care_team;
+  const riskFlags =
+    extras?.riskFlags !== undefined
+      ? extras.riskFlags?.trim() || undefined
+      : fromContact.risk_flags;
+  const base: DbEmergencyContact =
+    contact && typeof contact === "object"
+      ? {
+          name:
+            String((contact as Record<string, unknown>).name ?? "Not listed").trim() ||
+            "Not listed",
+          relationship:
+            String(
+              (contact as Record<string, unknown>).relationship ?? "Not listed"
+            ).trim() || "Not listed",
+          phone:
+            String(
+              (contact as Record<string, unknown>).phone ??
+                primaryLine ??
+                "Not listed"
+            ).trim() || "Not listed",
+        }
+      : {
+          name: "Not listed",
+          relationship: "Not listed",
+          phone: primaryLine?.trim() || "Not listed",
+        };
   return {
-    name: "Not listed",
-    relationship: "Not listed",
-    phone: primaryLine?.trim() || "Not listed",
+    ...base,
+    care_team: careTeam?.length ? careTeam : null,
+    risk_flags: riskFlags || null,
   };
 }
 
@@ -270,7 +315,10 @@ function buildProblemsForPatient(p: DemoPatient): DbProblem[] {
 
 export function demoPatientToRow(p: DemoPatient): Omit<PatientRow, "created_at" | "updated_at"> {
   const problems = buildProblemsForPatient(p);
-  const ec = emergencyContactToDb(p.emergencyContact, p.emergencyContact?.phone);
+  const ec = emergencyContactToDb(p.emergencyContact, p.emergencyContact?.phone, {
+    careTeam: p.careTeam,
+    riskFlags: p.riskFlags ?? null,
+  });
 
   return {
     id: p.id,
@@ -320,6 +368,7 @@ export function rowToDemoPatient(row: PatientRow): DemoPatient {
     relationship: "Not listed",
     phone: "Not listed",
   };
+  const extras = extrasFromEmergencyContact(emergencyContact);
   const phone =
     row.primary_contact_line?.trim() ||
     emergencyContact.phone ||
@@ -362,7 +411,8 @@ export function rowToDemoPatient(row: PatientRow): DemoPatient {
     },
     address: "Not listed",
     insurance: "Not listed",
-    careTeam: [],
+    careTeam: extras.care_team ?? [],
+    riskFlags: extras.risk_flags,
   };
 }
 
@@ -472,8 +522,16 @@ export function patchToRowUpdate(
   }
 
   if (patch.emergencyContact !== undefined) {
-    merged.emergencyContact = emergencyContactToDb(patch.emergencyContact);
-    out.emergency_contact = emergencyContactToDb(patch.emergencyContact);
+    merged.emergencyContact = {
+      name: emergencyContactToDb(patch.emergencyContact).name,
+      relationship: emergencyContactToDb(patch.emergencyContact).relationship,
+      phone: emergencyContactToDb(patch.emergencyContact).phone,
+    };
+    out.emergency_contact = emergencyContactToDb(
+      merged.emergencyContact,
+      merged.emergencyContact.phone,
+      { careTeam: merged.careTeam, riskFlags: merged.riskFlags ?? null }
+    );
     out.primary_contact_line =
       merged.emergencyContact.phone !== "Not listed"
         ? merged.emergencyContact.phone
@@ -485,7 +543,29 @@ export function patchToRowUpdate(
       ...merged.emergencyContact,
       phone: patch.primaryContactLine.trim() || merged.emergencyContact.phone,
     };
-    out.emergency_contact = emergencyContactToDb(merged.emergencyContact);
+    out.emergency_contact = emergencyContactToDb(
+      merged.emergencyContact,
+      merged.emergencyContact.phone,
+      { careTeam: merged.careTeam, riskFlags: merged.riskFlags ?? null }
+    );
+  }
+  if (patch.careTeam !== undefined) {
+    merged.careTeam = Array.isArray(patch.careTeam)
+      ? patch.careTeam.map((x) => String(x).trim()).filter(Boolean)
+      : [];
+    out.emergency_contact = emergencyContactToDb(
+      merged.emergencyContact,
+      merged.emergencyContact?.phone,
+      { careTeam: merged.careTeam, riskFlags: merged.riskFlags ?? null }
+    );
+  }
+  if (typeof patch.riskFlags === "string") {
+    merged.riskFlags = patch.riskFlags.trim() || undefined;
+    out.emergency_contact = emergencyContactToDb(
+      merged.emergencyContact,
+      merged.emergencyContact?.phone,
+      { careTeam: merged.careTeam, riskFlags: merged.riskFlags ?? null }
+    );
   }
 
   return out;
@@ -503,7 +583,12 @@ export function payloadToDemoPatient(
     : [];
   const problems = problemsFromDb(problemsToDb(body.problems, diagnoses));
   const names = problems.map((p) => p.name);
-  const ec = emergencyContactToDb(body.emergencyContact);
+  const ec = emergencyContactToDb(body.emergencyContact, undefined, {
+    careTeam: Array.isArray(body.careTeam)
+      ? body.careTeam.map((x) => String(x).trim()).filter(Boolean)
+      : undefined,
+    riskFlags: typeof body.riskFlags === "string" ? body.riskFlags : null,
+  });
 
   return {
     id,
@@ -530,9 +615,14 @@ export function payloadToDemoPatient(
     social: "",
     chartNote: "In triage",
     pcp: body.pcp ? String(body.pcp).trim() : undefined,
-    emergencyContact: ec,
+    emergencyContact: {
+      name: ec.name,
+      relationship: ec.relationship,
+      phone: ec.phone,
+    },
     address: "Not listed",
     insurance: "Not listed",
-    careTeam: [],
+    careTeam: ec.care_team ?? [],
+    riskFlags: ec.risk_flags ?? undefined,
   };
 }
