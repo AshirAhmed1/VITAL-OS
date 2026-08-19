@@ -12,11 +12,8 @@ export const AI_ASSISTANT_RESTRICTED_MESSAGE =
 export const API_AI_RESTRICTED_MESSAGE =
   "AI assistant access is restricted to doctors.";
 
-export const INVALID_DOCTOR_LOGIN_MESSAGE =
-  "Invalid doctor name or ID. Please try again.";
-
-export const INVALID_STAFF_LOGIN_MESSAGE =
-  "Invalid staff name or ID. Please try again.";
+export const INVALID_LOGIN_MESSAGE =
+  "Invalid email or password. Please try again.";
 
 export type VitalUser = {
   userId: string;
@@ -28,29 +25,6 @@ export type VitalUser = {
   hospitalName: string;
 };
 
-export type DemoDoctorAccount = {
-  userName: string;
-  doctorId: string;
-  role: "doctor";
-};
-
-/** Demo-only credentials — not production security. */
-export const DEMO_DOCTOR_ACCOUNTS: DemoDoctorAccount[] = [
-  { userName: "Eknoor Sidhu", doctorId: "74321", role: "doctor" },
-  { userName: "Ashir Ahmed", doctorId: "98768", role: "doctor" },
-];
-
-export type DemoStaffAccount = {
-  userName: string;
-  staffId: string;
-  role: "staff";
-};
-
-/** Demo-only credentials — not production security. */
-export const DEMO_STAFF_ACCOUNTS: DemoStaffAccount[] = [
-  { userName: "Gurdit Johal", staffId: "54321", role: "staff" },
-];
-
 export type VitalPermissions = {
   canUseAI: boolean;
   canAdmitPatient: boolean;
@@ -61,74 +35,6 @@ export type VitalPermissions = {
   canViewAnalytics: boolean;
   canViewSettings: boolean;
 };
-
-export function normalizePersonName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-export function normalizeCredentialId(id: string): string {
-  return id.trim();
-}
-
-/** @deprecated Use normalizePersonName */
-export const normalizeDoctorName = normalizePersonName;
-
-/** @deprecated Use normalizeCredentialId */
-export const normalizeDoctorId = normalizeCredentialId;
-
-export function findDemoDoctor(
-  fullName: string,
-  doctorId: string
-): DemoDoctorAccount | null {
-  const normalizedName = normalizePersonName(fullName);
-  const normalizedId = normalizeCredentialId(doctorId);
-  if (!normalizedName || !normalizedId) return null;
-  return (
-    DEMO_DOCTOR_ACCOUNTS.find(
-      (account) =>
-        normalizePersonName(account.userName) === normalizedName &&
-        normalizeCredentialId(account.doctorId) === normalizedId
-    ) ?? null
-  );
-}
-
-export function findDemoStaff(
-  fullName: string,
-  staffId: string
-): DemoStaffAccount | null {
-  const normalizedName = normalizePersonName(fullName);
-  const normalizedId = normalizeCredentialId(staffId);
-  if (!normalizedName || !normalizedId) return null;
-  return (
-    DEMO_STAFF_ACCOUNTS.find(
-      (account) =>
-        normalizePersonName(account.userName) === normalizedName &&
-        normalizeCredentialId(account.staffId) === normalizedId
-    ) ?? null
-  );
-}
-
-export function buildDoctorUser(account: DemoDoctorAccount): VitalUser {
-  return {
-    userId: `doctor-${account.doctorId}`,
-    userName: account.userName,
-    role: "doctor",
-    doctorId: account.doctorId,
-    hospitalId: DEMO_HOSPITAL_ID,
-    hospitalName: DEMO_HOSPITAL_NAME,
-  };
-}
-
-export function buildStaffUser(account: DemoStaffAccount): VitalUser {
-  return {
-    userId: `staff-${account.staffId}`,
-    userName: account.userName,
-    role: "staff",
-    staffId: account.staffId,
-    hospitalId: DEMO_HOSPITAL_ID,
-    hospitalName: DEMO_HOSPITAL_NAME,
-  };
-}
 
 export function formatDoctorDisplayName(userName: string): string {
   return `Dr. ${userName}`;
