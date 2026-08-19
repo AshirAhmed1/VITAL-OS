@@ -122,20 +122,59 @@ npm run dev
 Open **http://localhost:3000** in Chrome or Edge and allow microphone access
 when prompted.
 
-### 5. Sign in
+### 5. Create your clinician accounts
 
-Credentials are hardcoded in `lib/auth.ts` (demo only — not real authentication):
+Authentication is Supabase Auth — email and password, with the clinical role
+carried in user metadata. **There are no credentials in this repo.**
 
-| Role | Name | ID | Access |
-|---|---|---|---|
-| Doctor | `Eknoor Sidhu` | `74321` | Full — AI assistant enabled |
-| Doctor | `Ashir Ahmed` | `98768` | Full — AI assistant enabled |
-| Staff | `Gurdit Johal` | `54321` | Read-only — AI routes return 403 |
+In your Supabase dashboard go to **Authentication -> Users -> Add user ->
+Create new user** and create your accounts with **Auto Confirm User** ticked.
+An unconfirmed account cannot sign in.
 
-Use a doctor account. `/api/vital` and `/api/clinical-command` hard-reject
+Then in **SQL Editor**, attach a role to each account, substituting your own
+addresses:
+
+```sql
+update auth.users
+set raw_user_meta_data =
+      coalesce(raw_user_meta_data, '{}'::jsonb)
+      || '{"full_name":"Ada Lovelace","role":"doctor","doctor_id":"10001"}'::jsonb
+where lower(email) = lower('doctor@example.com');
+
+update auth.users
+set raw_user_meta_data =
+      coalesce(raw_user_meta_data, '{}'::jsonb)
+      || '{"full_name":"Sam Rivera","role":"staff","staff_id":"20001"}'::jsonb
+where lower(email) = lower('staff@example.com');
+```
+
+`||` merges rather than replaces, so existing metadata is preserved. Emails are
+stored lowercased, so compare with `lower()` or the `where` clause silently
+matches nothing.
+
+Verify before signing in:
+
+```sql
+select email,
+       raw_user_meta_data ->> 'full_name' as full_name,
+       raw_user_meta_data ->> 'role'      as role,
+       email_confirmed_at is not null     as confirmed
+from auth.users
+order by created_at;
+```
+
+Every account needs `confirmed = true` and a role of `doctor` or `staff`. An
+account with no role is signed straight back out — the permission model has
+nowhere to place it.
+
+Metadata is baked into the JWT when the token is issued, so sign out and back
+in after changing it.
+
+Sign in with a doctor account. `/api/vital` and `/api/clinical-command` reject
 anything that isn't `role === "doctor"`.
 
----
+Doctor and staff IDs are **attributes, not credentials** — they identify a
+clinician in the UI and do not authenticate anyone.
 
 ## Verify your setup
 
@@ -273,7 +312,7 @@ frozen page, which is expected rather than a bug.
 | `hooks/use-utterance-recorder.ts` | MediaRecorder lifecycle, one buffer per recorder generation |
 | `lib/patient-store.ts` | Supabase persistence layer |
 | `lib/patient-db.ts` | Row ↔ domain model mapping |
-| `lib/auth.ts` | Demo credentials, roles, permission matrix |
+| `lib/auth.ts` | Roles, permission matrix, request-role parsing |
 | `components/vital-os-client.tsx` | Voice UI, admission state machine, TTS, workspace panel |
 | `supabase/*.sql` | Schema and migrations |
 
@@ -327,17 +366,33 @@ full Groq budget before falling back.
 This is a **demo application** and should not be pointed at real patient data.
 It is not production-ready and makes no claim to HIPAA compliance.
 
-- Authentication is hardcoded name/ID pairs in `lib/auth.ts` with no sessions,
-  password hashing, or token verification.
-- Row Level Security is **disabled** on `public.patients`, with full CRUD granted
-  to the `anon` role. Anyone holding the anon key — which is exposed to every
-  browser by design — can read and write every row.
-- Role gating is enforced in route handlers via an `x-vital-role` header, which
-  a client can trivially set itself.
+**What is real:**
 
-Hardening this means real Supabase Auth sessions, a `clinician_id` column, RLS
-policies scoped to `auth.uid()`, and JWT verification in middleware — in that
-order, with RLS re-enabled last.
+- Authentication is Supabase Auth. Sign-in is email and password; sessions are
+  JWTs stored in cookies and refreshed server-side in `middleware.ts`, which
+  verifies the token signature with `getClaims()` rather than trusting
+  `getSession()`.
+
+**What is not yet enforced:**
+
+- Row Level Security is **disabled** on `public.patients`, with full CRUD
+  granted to the `anon` role. Anyone holding the anon key — exposed to every
+  browser by design — can read and write every row.
+- Route handlers still gate by an `x-vital-role` header, which any client can
+  set. A signed-out caller can exercise every patient route with one header.
+- The clinical role lives in `user_metadata`, which the account holder can
+  rewrite via `auth.updateUser()`. Role is a UI convenience, not an
+  authorization boundary.
+
+Authentication is therefore real; **authorization is not**. Closing that gap
+means moving the authoritative role into a `clinicians` table, adding
+`clinician_id` and `hospital_id` to `patients`, writing RLS policies with
+`with check` on every write, and enabling RLS last — verified by confirming a
+cross-tenant read returns zero rows.
+
+Real clinical systems authenticate staff by network ID through enterprise SSO
+(SAML/OIDC against a hospital directory), not email. Supabase supports SSO;
+this app does not use it, and makes no claim to hospital-grade identity.
 
 ---
 
