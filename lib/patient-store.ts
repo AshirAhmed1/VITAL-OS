@@ -14,7 +14,7 @@ import {
   rowToDemoPatient,
   type PatientRow,
 } from "@/lib/patient-db";
-import { getSupabase } from "@/lib/supabase";
+import { createServerSupabase } from "@/lib/supabase/server";
 
 export type PatientStoreEvent =
   | { action: "created"; patientId: string }
@@ -41,7 +41,7 @@ function newMrn(): string {
 }
 
 async function seedDemoPatientsIfEmpty(): Promise<void> {
-  const supabase = getSupabase();
+  const supabase = createServerSupabase();
   const { count, error: countError } = await supabase
     .from("patients")
     .select("id", { count: "exact", head: true });
@@ -96,7 +96,7 @@ function filterDischargedRows(rows: PatientRow[]): PatientRow[] {
 }
 
 async function fetchAllRows(activeOnly = true): Promise<PatientRow[]> {
-  const supabase = getSupabase();
+  const supabase = createServerSupabase();
   await seedDemoPatientsIfEmpty();
 
   let query = supabase.from("patients").select("*").order("name", { ascending: true });
@@ -130,7 +130,7 @@ export async function listPatients(): Promise<DemoPatient[]> {
 }
 
 export async function listDischargedPatients(): Promise<DemoPatient[]> {
-  const supabase = getSupabase();
+  const supabase = createServerSupabase();
   await seedDemoPatientsIfEmpty();
   const { data, error } = await supabase
     .from("patients")
@@ -159,7 +159,7 @@ export async function listDischargedPatients(): Promise<DemoPatient[]> {
 
 export async function getPatientById(id: string): Promise<DemoPatient | undefined> {
   const idTrim = id.trim();
-  const supabase = getSupabase();
+  const supabase = createServerSupabase();
   await seedDemoPatientsIfEmpty();
 
   const { data, error } = await supabase
@@ -214,7 +214,7 @@ export async function createPatientFromPayload(
     discharged_at: row.discharged_at,
   });
 
-  const supabase = getSupabase();
+  const supabase = createServerSupabase();
   let { data, error } = await supabase
     .from("patients")
     .insert(row)
@@ -265,7 +265,7 @@ async function tryUpdateRow(
   idTrim: string,
   rowPatch: Partial<PatientRow>
 ): Promise<{ ok: true; row: PatientRow } | { ok: false; missingColumn: boolean; error: Error }> {
-  const supabase = getSupabase();
+  const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from("patients")
     .update(rowPatch)
@@ -413,7 +413,7 @@ export async function deletePatientById(
   id: string
 ): Promise<{ event: PatientStoreEvent } | null> {
   const idTrim = id.trim();
-  const supabase = getSupabase();
+  const supabase = createServerSupabase();
 
   const { data, error } = await supabase
     .from("patients")
