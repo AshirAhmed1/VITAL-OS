@@ -2,13 +2,14 @@
 
 import * as React from "react";
 
+import type { Session, User } from "@supabase/supabase-js";
+
+import { createBrowserSupabase } from "@/lib/supabase/client";
 import {
-  buildDoctorUser,
-  buildStaffUser,
-  findDemoDoctor,
-  findDemoStaff,
+  DEMO_HOSPITAL_ID,
+  DEMO_HOSPITAL_NAME,
   getPermissions,
-  isVitalUser,
+  parseRole,
   type VitalPermissions,
   type VitalRole,
   type VitalUser,
@@ -18,106 +19,123 @@ export type { VitalRole, VitalUser, VitalPermissions };
 export {
   ACCESS_RESTRICTED_MESSAGE,
   AI_ASSISTANT_RESTRICTED_MESSAGE,
-  INVALID_DOCTOR_LOGIN_MESSAGE,
-  INVALID_STAFF_LOGIN_MESSAGE,
+  INVALID_LOGIN_MESSAGE,
 } from "@/lib/auth";
+
+export type LoginResult = { ok: true } | { ok: false; message: string };
 
 type AuthContextValue = {
   user: VitalUser | null;
   role: VitalRole | null;
   permissions: VitalPermissions;
-  loginDoctor: (fullName: string, doctorId: string) => boolean;
-  loginStaff: (fullName: string, staffId: string) => boolean;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  logout: () => Promise<void>;
   hydrated: boolean;
 };
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
-const STORAGE_KEY = "vital-os-user";
-const LEGACY_ROLE_KEY = "vital-os-role";
+const MISSING_ROLE_MESSAGE =
+  "This account has no clinical role assigned. Contact your administrator.";
 
-function readStoredUser(): VitalUser | null {
-  try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      if (isVitalUser(parsed)) {
-        if (parsed.role === "doctor" && !parsed.doctorId) return null;
-        if (parsed.role === "staff" && !parsed.staffId) return null;
-        return parsed;
-      }
-    }
-
-    const legacyRole = window.sessionStorage.getItem(LEGACY_ROLE_KEY);
-    if (legacyRole === "staff" || legacyRole === "doctor") {
-      window.sessionStorage.removeItem(LEGACY_ROLE_KEY);
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
+function readString(
+  meta: Record<string, unknown>,
+  key: string
+): string | undefined {
+  const value = meta[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function persistUser(user: VitalUser | null) {
-  try {
-    if (user) {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-    } else {
-      window.sessionStorage.removeItem(STORAGE_KEY);
-    }
-    window.sessionStorage.removeItem(LEGACY_ROLE_KEY);
-  } catch {
-    /* ignore */
-  }
+/**
+ * Project a Supabase user onto the app's VitalUser shape.
+ *
+ * Role and display name come from `user_metadata`, set at account creation.
+ * Note that `user_metadata` is writable by the account holder — it is a
+ * convenience source for UI, not an authorization boundary. The authoritative
+ * role moves to the `clinicians` table in M2, where RLS protects it.
+ */
+export function toVitalUser(user: User | null | undefined): VitalUser | null {
+  if (!user) return null;
+  const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+
+  const role = parseRole(meta.role);
+  if (!role) return null;
+
+  return {
+    userId: user.id,
+    userName: readString(meta, "full_name") ?? user.email ?? "Clinician",
+    role,
+    doctorId: role === "doctor" ? readString(meta, "doctor_id") : undefined,
+    staffId: role === "staff" ? readString(meta, "staff_id") : undefined,
+    hospitalId: DEMO_HOSPITAL_ID,
+    hospitalName: DEMO_HOSPITAL_NAME,
+  };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const supabase = React.useMemo(() => createBrowserSupabase(), []);
   const [user, setUser] = React.useState<VitalUser | null>(null);
   const [hydrated, setHydrated] = React.useState(false);
 
   React.useEffect(() => {
-    setUser(readStoredUser());
-    setHydrated(true);
-  }, []);
+    let active = true;
 
-  const loginDoctor = React.useCallback((fullName: string, doctorId: string) => {
-    const account = findDemoDoctor(fullName, doctorId);
-    if (!account) return false;
-    const next = buildDoctorUser(account);
-    setUser(next);
-    persistUser(next);
-    return true;
-  }, []);
+    const applySession = (session: Session | null) => {
+      if (!active) return;
+      setUser(toVitalUser(session?.user));
+    };
 
-  const loginStaff = React.useCallback((fullName: string, staffId: string) => {
-    const account = findDemoStaff(fullName, staffId);
-    if (!account) return false;
-    const next = buildStaffUser(account);
-    setUser(next);
-    persistUser(next);
-    return true;
-  }, []);
+    void supabase.auth.getSession().then(({ data }) => {
+      applySession(data.session);
+      if (active) setHydrated(true);
+    });
 
-  const logout = React.useCallback(() => {
+    const { data: subscription } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        applySession(session);
+      }
+    );
+
+    return () => {
+      active = false;
+      subscription.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  const login = React.useCallback(
+    async (email: string, password: string): Promise<LoginResult> => {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        return { ok: false, message: error.message };
+      }
+
+      // An account without a role cannot be gated correctly, so refuse the
+      // session rather than admitting a user the permission model can't place.
+      if (!toVitalUser(data.user)) {
+        await supabase.auth.signOut();
+        return { ok: false, message: MISSING_ROLE_MESSAGE };
+      }
+
+      return { ok: true };
+    },
+    [supabase]
+  );
+
+  const logout = React.useCallback(async () => {
+    await supabase.auth.signOut();
     setUser(null);
-    persistUser(null);
-  }, []);
+  }, [supabase]);
 
   const role = user?.role ?? null;
   const permissions = getPermissions(role);
 
   return (
     <AuthContext.Provider
-      value={{
-        user,
-        role,
-        permissions,
-        loginDoctor,
-        loginStaff,
-        logout,
-        hydrated,
-      }}
+      value={{ user, role, permissions, login, logout, hydrated }}
     >
       {children}
     </AuthContext.Provider>
