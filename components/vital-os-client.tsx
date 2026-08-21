@@ -63,7 +63,6 @@ import {
   ACCESS_RESTRICTED_MESSAGE,
   AI_ASSISTANT_RESTRICTED_MESSAGE,
   formatDoctorDisplayName,
-  roleRequestHeaders,
   type VitalRole,
 } from "@/lib/auth";
 import type { ConversationTurn } from "@/lib/vital-llm";
@@ -414,8 +413,7 @@ function problemsToEditable(
 
 async function persistPatientProblems(
   patientId: string,
-  problems: EditableProblem[],
-  role: VitalRole
+  problems: EditableProblem[]
 ): Promise<boolean> {
   const payload = problems.map(({ name, status, since }) => ({
     name,
@@ -424,10 +422,7 @@ async function persistPatientProblems(
   }));
   const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...roleRequestHeaders(role),
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ problems: payload }),
   });
   return res.ok;
@@ -435,15 +430,11 @@ async function persistPatientProblems(
 
 async function persistPatientPatch(
   patientId: string,
-  patch: Record<string, unknown>,
-  role: VitalRole
+  patch: Record<string, unknown>
 ): Promise<{ ok: boolean; error?: string; patient?: DemoPatient }> {
   const res = await fetch(`/api/patients/${encodeURIComponent(patientId)}`, {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...roleRequestHeaders(role),
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
   const body = (await res.json().catch(() => ({}))) as {
@@ -2944,7 +2935,7 @@ export default function VitalOsClient() {
           p.id === patientId ? { ...p, ...optimistic } : p
         );
       });
-      const result = await persistPatientPatch(patientId, patch, apiRole);
+      const result = await persistPatientPatch(patientId, patch);
       if (!result.ok) {
         if (snapshot) {
           const rolled = snapshot;
@@ -3257,7 +3248,7 @@ export default function VitalOsClient() {
       if (recorderRef.current.available) {
         /* Whisper adds ~400ms between endpoint and submit; show work immediately. */
         setSystemState("processing");
-        const outcome = await recorderRef.current.finalize(apiRole);
+        const outcome = await recorderRef.current.finalize();
         choice = outcome
           ? chooseTranscript(outcome, browserText)
           : {
@@ -4062,7 +4053,7 @@ export default function VitalOsClient() {
             pushLocalAssistantResponse(command, "There is no recent change to undo.");
             return true;
           }
-          const { ok } = await persistPatientPatch(snap.patientId, snap.patch, apiRole);
+          const { ok } = await persistPatientPatch(snap.patientId, snap.patch);
           lastUndoRef.current = null;
           if (!ok) {
             pushLocalAssistantResponse(command, "Undo failed. Try again.");
@@ -4192,8 +4183,7 @@ export default function VitalOsClient() {
             if (Object.keys(result.patch).length > 0) {
               const { ok } = await persistPatientPatch(
                 targetPatient.id,
-                result.patch,
-                apiRole
+                result.patch
               );
               if (!ok) {
                 pushLocalAssistantResponse(command, "Update failed. Try again.");
@@ -4247,10 +4237,7 @@ export default function VitalOsClient() {
         try {
           const res = await fetch("/api/patients", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              ...roleRequestHeaders(apiRole),
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
           const body = (await res.json().catch(() => ({}))) as {
@@ -4407,7 +4394,7 @@ export default function VitalOsClient() {
           ...prev,
           [target.id]: updatedProblems,
         }));
-        void persistPatientProblems(target.id, updatedProblems, apiRole).then(
+        void persistPatientProblems(target.id, updatedProblems).then(
           (ok) => {
             if (ok) void refreshPatients();
           }
@@ -4691,8 +4678,7 @@ export default function VitalOsClient() {
             dischargeReason: reason,
             dischargedBy: providerName,
             encounterStatus: "Discharged",
-          },
-          apiRole
+          }
         );
         if (!ok) {
           pushLocalAssistantResponse(transcript, "Discharge failed. Try again.");
@@ -5803,10 +5789,7 @@ export default function VitalOsClient() {
                               void (async () => {
                                 const res = await fetch("/api/patients", {
                                   method: "POST",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                    ...roleRequestHeaders(apiRole),
-                                  },
+                                  headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({
                                     name: admitDraft.name.trim(),
                                     room: admitDraft.room.trim(),
@@ -5912,7 +5895,6 @@ export default function VitalOsClient() {
                                       `/api/patients/${encodeURIComponent(p.id)}`,
                                       {
                                         method: "DELETE",
-                                        headers: roleRequestHeaders(apiRole),
                                       }
                                     );
                                     if (!res.ok) return;

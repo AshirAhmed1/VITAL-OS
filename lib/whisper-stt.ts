@@ -94,8 +94,6 @@ function failureForStatus(status: number): TranscriptionFailure {
 
 export interface PostUtteranceInput {
   audio: Blob;
-  /** Sent as x-vital-role; the route rejects anything but "doctor" with 403. */
-  role: string;
   durationMs?: number;
   language?: string;
   filename?: string;
@@ -114,7 +112,7 @@ export interface PostUtteranceInput {
 export async function postUtterance(
   input: PostUtteranceInput
 ): Promise<TranscriptionOutcome> {
-  const { audio, role } = input;
+  const { audio } = input;
 
   if (audio.size < MIN_UTTERANCE_BYTES) {
     return {
@@ -164,8 +162,8 @@ export async function postUtterance(
   try {
     const res = await doFetch(TRANSCRIBE_ENDPOINT, {
       method: "POST",
-      /* No Content-Type: the browser sets the multipart boundary itself. */
-      headers: { "x-vital-role": role },
+      /* No Content-Type: the browser sets the multipart boundary itself, and
+         no role header: /api/transcribe reads the caller's clinicians row. */
       body: form,
       signal: controller.signal,
       cache: "no-store",

@@ -85,33 +85,73 @@ won't pick them up.
 
 ### 3. Set up the database
 
-The patient roster is persisted in Supabase Postgres, not on disk. Without this
-step the roster, chart views, and every AI turn that touches patient data will fail.
+The patient roster, clinician roles, and hospital tenancy are all persisted in
+Supabase Postgres. Without this step the roster and chart views fail, and every
+clinical action returns 403 — role is read from the database, so a missing
+`clinicians` table denies everything.
 
-In your Supabase dashboard → **SQL Editor** → **New query**, run these two files
-from this repo, in order:
+In your Supabase dashboard → **SQL Editor** → **New query**, run each file
+below as its own query, **in this order**:
 
-1. **`supabase/patients.sql`** — creates the `patients` table, indexes, the
-   `updated_at` trigger, and role grants
-2. **`supabase/add_patient_voice_fields.sql`** — additive columns for chart notes
-   and discharge tracking
+| # | File | What it does |
+|---|---|---|
+| 1 | `supabase/patients.sql` | `patients` table, indexes, `updated_at` trigger, role grants |
+| 2 | `supabase/add_patient_voice_fields.sql` | Chart notes and discharge columns |
+| 3 | `supabase/migrations/0001_hospitals.sql` | `hospitals` — the tenancy root |
+| 4 | `supabase/migrations/0002_clinicians.sql` | `clinicians` — the authoritative role store |
+| 5 | `supabase/migrations/0003_backfill_clinicians.sql` | Populates `clinicians` from existing `auth.users` |
+| 6 | `supabase/migrations/0004_clinician_provisioning_trigger.sql` | Provisions new users automatically |
+| 7 | `supabase/migrations/0005_patients_tenancy.sql` | `hospital_id` and `clinician_id` on `patients` |
 
-Both are idempotent (`if not exists` throughout), so re-running either is safe.
-`Success. No rows returned` is the expected output — DDL doesn't return rows.
+**Order matters.** Each migration references tables the previous one creates.
 
-Ignore the other two SQL files:
-`merge_symptoms_into_problems.sql` is marked deprecated in its own header, and
-`reset_problems_diagnoses_only.sql` is a data reset, not a schema step.
+**Step 2 is required, not optional.** Skipping it does not produce an error —
+`lib/patient-store.ts` catches the missing column and retries without it, so
+every admission silently returns `201` with its chart notes discarded.
+
+**Run step 3 onward again after creating your accounts** in section 5. Migration
+5 reads whatever is in `auth.users` at the time; if you set up accounts later,
+re-run `0003_backfill_clinicians.sql` to pick them up. It is idempotent.
+
+All files are idempotent (`if not exists` / `on conflict do nothing`), so
+re-running any of them is safe. `Success. No rows returned` is the expected
+output — DDL doesn't return rows.
+
+Ignore the other two SQL files: `merge_symptoms_into_problems.sql` is marked
+deprecated in its own header, and `reset_problems_diagnoses_only.sql` is a data
+reset, not a schema step.
+
+#### Verifying
+
+Each migration has a matching read-only file in `supabase/checks/` listing its
+expected results. **Run those one statement at a time** — the Supabase SQL Editor
+renders only the last statement's output, so running a checks file whole
+silently discards everything but the final query.
+
+One query confirms the whole schema:
+
+```sql
+select
+  (select count(*) from public.hospitals)                          as hospitals,
+  (select count(*) from public.clinicians)                         as clinicians,
+  (select count(*) from auth.users)                                as auth_users,
+  (select count(*) from public.patients where hospital_id is null) as patients_without_tenant,
+  (select count(*) from pg_trigger
+     where tgrelid = 'auth.users'::regclass and not tgisinternal)  as auth_triggers;
+```
+
+`clinicians` must equal `auth_users`, `patients_without_tenant` must be `0`, and
+`auth_triggers` must be `2`. A clinician count below the user count means
+someone will authenticate successfully and then be denied every action.
 
 > **If Supabase prompts you to "Enable RLS", decline it.** This demo runs with
-> Row Level Security disabled and CRUD granted to the `anon` role — see
-> [Security posture](#security-posture) below. Enabling RLS without policies
-> blocks every insert and silently returns zero rows on read. Decline the
-> linter's auto-generated `USING (true)` policy too; it grants everything while
-> looking like a control.
+> Row Level Security disabled — see [Security posture](#security-posture).
+> Enabling RLS without policies returns zero rows on every read, with no error.
+> Decline the linter's auto-generated `USING (true)` policy too; it grants
+> everything while looking like a control.
 
-You do **not** need to seed data manually. The first call to `listPatients()`
-runs `seedDemoPatientsIfEmpty()` and inserts the demo roster automatically.
+You do **not** need to seed patient data manually. The first call to
+`listPatients()` runs `seedDemoPatientsIfEmpty()` and inserts the demo roster.
 
 ### 4. Run
 
@@ -167,8 +207,24 @@ Every account needs `confirmed = true` and a role of `doctor` or `staff`. An
 account with no role is signed straight back out — the permission model has
 nowhere to place it.
 
-Metadata is baked into the JWT when the token is issued, so sign out and back
-in after changing it.
+Metadata is the **write** source for roles; the `clinicians` table is what the
+server actually reads. A trigger installed by
+`supabase/migrations/0004_clinician_provisioning_trigger.sql` keeps them in sync
+— it fires on user creation and again whenever metadata changes, so the `update`
+statements above provision the `clinicians` row for you.
+
+If you created your accounts **before** running the migrations, the trigger did
+not exist yet. Re-run `supabase/migrations/0003_backfill_clinicians.sql` to
+populate `clinicians` for them, then confirm:
+
+```sql
+select role, full_name, staff_ref, hospital_id
+from public.clinicians
+order by role, staff_ref;
+```
+
+One row per account. A user with no row here authenticates normally and is then
+denied every clinical action — the server treats a missing row as "deny".
 
 Sign in with a doctor account. `/api/vital` and `/api/clinical-command` reject
 anything that isn't `role === "doctor"`.
@@ -312,9 +368,12 @@ frozen page, which is expected rather than a bug.
 | `hooks/use-utterance-recorder.ts` | MediaRecorder lifecycle, one buffer per recorder generation |
 | `lib/patient-store.ts` | Supabase persistence layer |
 | `lib/patient-db.ts` | Row ↔ domain model mapping |
-| `lib/auth.ts` | Roles, permission matrix, request-role parsing |
+| `lib/auth.ts` | Roles, permission matrix, restricted-field classification |
+| `lib/auth-server.ts` | Server-side caller identity; resolves role from `clinicians` |
 | `components/vital-os-client.tsx` | Voice UI, admission state machine, TTS, workspace panel |
-| `supabase/*.sql` | Schema and migrations |
+| `supabase/*.sql` | Original schema, applied before `migrations/` existed |
+| `supabase/migrations/*.sql` | Ordered schema changes; run by number |
+| `supabase/checks/*.sql` | Read-only verification for each migration |
 
 ---
 
@@ -373,22 +432,34 @@ It is not production-ready and makes no claim to HIPAA compliance.
   verifies the token signature with `getClaims()` rather than trusting
   `getSession()`.
 
+- Role is resolved server-side from the `clinicians` table, keyed on the
+  authenticated user's id. `lib/auth-server.ts` validates the JWT with
+  `getUser()` rather than decoding the cookie with `getSession()`, so a forged
+  token does not produce a caller. There is no client-supplied role header: a
+  request cannot assert its own privileges.
+- Admissions are attributed to the authenticated clinician via
+  `patients.clinician_id`, taken from the session and never from the request
+  body.
+
 **What is not yet enforced:**
 
-- Row Level Security is **disabled** on `public.patients`, with full CRUD
-  granted to the `anon` role. Anyone holding the anon key — exposed to every
-  browser by design — can read and write every row.
-- Route handlers still gate by an `x-vital-role` header, which any client can
-  set. A signed-out caller can exercise every patient route with one header.
-- The clinical role lives in `user_metadata`, which the account holder can
-  rewrite via `auth.updateUser()`. Role is a UI convenience, not an
-  authorization boundary.
+- Row Level Security is **disabled** on `hospitals`, `clinicians`, and
+  `patients`. Anyone holding the anon key — exposed to every browser by design —
+  can read and write every row directly through PostgREST, bypassing the route
+  handlers entirely. The role gate above protects the API, not the database.
+- `patients.hospital_id` is not immutable. `patients` carries a table-level
+  `UPDATE` grant, which implies update on every column; a column-level revoke
+  cannot remove it. A client could reassign a patient's tenant through
+  PostgREST.
+- `user_metadata` is writable by the account holder via `auth.updateUser()`, and
+  the provisioning trigger mirrors metadata into `clinicians`. Until RLS lands,
+  that path is a self-service role change.
 
-Authentication is therefore real; **authorization is not**. Closing that gap
-means moving the authoritative role into a `clinicians` table, adding
-`clinician_id` and `hospital_id` to `patients`, writing RLS policies with
-`with check` on every write, and enabling RLS last — verified by confirming a
-cross-tenant read returns zero rows.
+Authentication and API-level authorization are real; **database-level isolation
+is not**. Closing that gap means RLS policies with `with check` on every write,
+pinning `hospital_id` to the caller's tenant, enabled last — verified by
+confirming a cross-tenant read returns zero rows and a cross-tenant write is
+refused.
 
 Real clinical systems authenticate staff by network ID through enterprise SSO
 (SAML/OIDC against a hospital directory), not email. Supabase supports SSO;

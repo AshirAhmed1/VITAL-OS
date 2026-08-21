@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { API_AI_RESTRICTED_MESSAGE, parseRoleFromRequest } from "@/lib/auth";
+import { API_AI_RESTRICTED_MESSAGE } from "@/lib/auth";
+import { requireDoctor } from "@/lib/auth-server";
 import {
   GEMINI_CLINICAL_MODEL,
   getGemini,
@@ -68,8 +69,12 @@ async function transcribeWithGemini(
 }
 
 export async function POST(req: Request) {
-  const role = parseRoleFromRequest(req);
-  if (role !== "doctor") {
+  // Adds a Supabase round-trip to the speech path, on every utterance. Chosen
+  // deliberately over caching: the lookup is a primary-key hit, and a stale
+  // cached role is a security bug where a slow route is only a latency one.
+  // If this shows up in transcription latency, measure before caching.
+  const caller = await requireDoctor();
+  if (!caller) {
     return NextResponse.json(
       { error: API_AI_RESTRICTED_MESSAGE },
       { status: 403, headers: { "Cache-Control": "no-store" } }

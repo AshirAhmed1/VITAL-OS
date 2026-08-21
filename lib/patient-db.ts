@@ -58,6 +58,20 @@ export type PatientRow = {
   discharged_by?: string | null;
   created_at?: string;
   updated_at?: string;
+
+  // Tenancy, added in supabase/migrations/0005_patients_tenancy.sql.
+  //
+  // Optional so demoPatientToRow()'s Omit<PatientRow, ...> return type stays
+  // satisfied without building them: hospital_id comes from the column default
+  // on insert, and clinician_id stays null until step 6 threads caller identity
+  // into createPatientFromPayload().
+  //
+  // Not protected from client writes yet. patients holds a table-level UPDATE
+  // grant for anon and authenticated, which implies UPDATE on every column; a
+  // column-level revoke cannot remove it. M3 pins hospital_id with an RLS
+  // WITH CHECK instead.
+  hospital_id?: string;
+  clinician_id?: string | null;
 };
 
 function isoDateOnly(value: string | null | undefined): string {
