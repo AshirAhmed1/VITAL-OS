@@ -36,7 +36,7 @@ order by id;
 -- would be unattributable to tenancy. The fixture refuses to run in that state,
 -- so seeing it here means the row was edited afterwards.
 -- ---------------------------------------------------------------------------
-select c.hospital_id, c.role, c.full_name, c.staff_ref, u.email
+select c.id as uuid, c.hospital_id, c.role, c.full_name, c.staff_ref, u.email
 from public.clinicians c
 join auth.users u on u.id = c.id
 order by c.hospital_id, c.role, u.email;
