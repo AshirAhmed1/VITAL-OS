@@ -32,6 +32,7 @@ function extractMrnFromText(text: string): string | null {
 const MODIFICATION_NAME_PATTERNS: RegExp[] = [
   /discharge\s+(?:patient\s+)?(.+?)$/i,
   /(?:move|transfer|assign)\s+(?:patient\s+)?(.+?)\s+(?:to|into)\s+(?:room\s+)?/i,
+  /(?:add|start|prescribe|give)\s+patient\s+([A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]+)*?)\s+(?:with|to|for)\b/i,
   /(?:add|start|prescribe|give)\s+.+?\s+(?:to|for)\s+(.+?)$/i,
   /(?:summarize|summary\s+(?:for|of))\s+(?:patient\s+)?(.+?)$/i,
   /mark\s+(?:patient\s+)?([A-Za-z][A-Za-z'-]+(?:\s+[A-Za-z][A-Za-z'-]+)+)\s+(?:stable|improving|worsening|critical|discharged)/i,

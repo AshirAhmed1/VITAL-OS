@@ -1698,7 +1698,7 @@ function isInvalidChiefConcernInput(q: string): boolean {
   if (/\b(?:\d{1,3}\s*(?:year[s]?\s*old|yo)?\s*)?(?:male|female|man|woman|boy|girl)\b/i.test(low)) {
     return true;
   }
-  if (parsePatientName(q)) return true;
+  
   const looksMedication =
     /\b(needs?|give|start|order|prescribe|medication|meds?)\b/i.test(q) &&
     /\b(aspirin|ibuprofen|tylenol|advil|acetaminophen|metformin|salbutamol|amoxicillin|penicillin|codeine)\b/i.test(
