@@ -50,7 +50,7 @@ export async function POST(req: Request) {
         { status: 403 }
       );
     }
-    const { patient } = await createPatientFromPayload(body);
+    const { patient } = await createPatientFromPayload(body, caller.userId);
     return NextResponse.json(
       { patient },
       { status: 201, headers: { "Cache-Control": "no-store" } }
