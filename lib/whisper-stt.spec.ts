@@ -79,7 +79,6 @@ async function run() {
     let called = 0;
     const out = await postUtterance({
       audio: new Blob([new Uint8Array(64)], { type: "audio/webm" }),
-      role: "doctor",
       fetchImpl: (async () => {
         called += 1;
         return {} as Response;
@@ -96,7 +95,6 @@ async function run() {
     const out = await postUtterance({
       audio: clip(),
       durationMs: 120,
-      role: "doctor",
       fetchImpl: (async () => {
         called += 1;
         return {} as Response;
@@ -107,16 +105,18 @@ async function run() {
     assert.equal(out.ok === false && out.reason, "too-short");
   });
 
-  await test("the role header is sent — the route 403s without it", async () => {
+  await test("no role header is sent — the route reads the DB, not the client", async () => {
     const captured: { req?: RequestInit } = {};
     await postUtterance({
       audio: clip(),
-      role: "doctor",
       fetchImpl: stubFetch(200, { text: "start metoprolol" }, captured),
     });
 
-    const headers = captured.req?.headers as Record<string, string>;
-    assert.equal(headers["x-vital-role"], "doctor");
+    const headers = (captured.req?.headers ?? {}) as Record<string, string>;
+    /* M2 step 6: /api/transcribe resolves role from the caller's clinicians
+       row. A client-set header was forgeable -- Invoke-RestMethod with
+       x-vital-role: doctor reached every doctor-only route. */
+    assert.equal(headers["x-vital-role"], undefined);
     /* Content-Type must be absent so the browser can set the multipart boundary. */
     assert.equal(headers["Content-Type"], undefined);
     assert.equal(captured.req?.method, "POST");
@@ -125,7 +125,6 @@ async function run() {
   await test("a successful response surfaces provider and latency", async () => {
     const out = await postUtterance({
       audio: clip(),
-      role: "doctor",
       fetchImpl: stubFetch(200, {
         text: "  start metoprolol 5 mg IV  ",
         provider: "groq-whisper",
@@ -153,7 +152,6 @@ async function run() {
     for (const [status, reason] of cases) {
       const out = await postUtterance({
         audio: clip(),
-        role: "staff",
         fetchImpl: stubFetch(status, { error: `boom ${status}` }),
       });
       assert.equal(out.ok, false);
@@ -168,7 +166,6 @@ async function run() {
   await test("a 200 with no text is a failure, not an empty command", async () => {
     const out = await postUtterance({
       audio: clip(),
-      role: "doctor",
       fetchImpl: stubFetch(200, { text: "   " }),
     });
     assert.equal(out.ok === false && out.reason, "empty");
@@ -177,7 +174,6 @@ async function run() {
   await test("a wedged upload is abandoned at the client budget", async () => {
     const out = await postUtterance({
       audio: clip(),
-      role: "doctor",
       timeoutMs: 60,
       fetchImpl: ((_url: string, init?: RequestInit) =>
         new Promise((_resolve, reject) => {
@@ -196,7 +192,6 @@ async function run() {
   await test("a network error is a value, not a thrown exception", async () => {
     const out = await postUtterance({
       audio: clip(),
-      role: "doctor",
       fetchImpl: (async () => {
         throw new TypeError("Failed to fetch");
       }) as unknown as typeof fetch,
@@ -209,7 +204,6 @@ async function run() {
     const controller = new AbortController();
     const pending = postUtterance({
       audio: clip(),
-      role: "doctor",
       signal: controller.signal,
       fetchImpl: ((_url: string, init?: RequestInit) =>
         new Promise((_resolve, reject) => {

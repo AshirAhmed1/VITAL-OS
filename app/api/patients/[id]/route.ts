@@ -3,8 +3,8 @@ import { NextResponse } from "next/server";
 import {
   DOCTOR_ONLY_API_MESSAGE,
   isRestrictedClinicalPatch,
-  parseRoleFromRequest,
 } from "@/lib/auth";
+import { getCallerClinician, requireDoctor } from "@/lib/auth-server";
 import {
   deletePatientById,
   getPatientById,
@@ -37,12 +37,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const { id } = ctx.params;
   try {
     const patch = (await req.json().catch(() => ({}))) as unknown;
-    const role = parseRoleFromRequest(
-      req,
-      patch && typeof patch === "object"
-        ? (patch as Record<string, unknown>).role
-        : undefined
-    );
+    // The patch body's own `role` field is no longer read. A client that can
+    // set the field it is checked against is not being checked.
+    const caller = await getCallerClinician();
+    const role = caller?.role ?? null;
     if (isRestrictedClinicalPatch(patch) && role !== "doctor") {
       return NextResponse.json(
         { error: DOCTOR_ONLY_API_MESSAGE },
@@ -66,8 +64,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
 export async function DELETE(req: Request, ctx: Ctx) {
   const { id } = ctx.params;
   try {
-    const role = parseRoleFromRequest(req);
-    if (role !== "doctor") {
+    const caller = await requireDoctor();
+    if (!caller) {
       return NextResponse.json(
         { error: DOCTOR_ONLY_API_MESSAGE },
         { status: 403 }

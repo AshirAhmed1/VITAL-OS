@@ -53,7 +53,7 @@ export interface UtteranceRecorder {
    * Returns null when there was nothing worth sending, which the caller should
    * read as "use the browser transcript".
    */
-  finalize: (role: string) => Promise<TranscriptionOutcome | null>;
+  finalize: () => Promise<TranscriptionOutcome | null>;
   /** Drop the current utterance and reopen a clean window. */
   discard: () => void;
   /** Release the microphone entirely. */
@@ -232,7 +232,7 @@ export function useUtteranceRecorder(): UtteranceRecorder {
   );
 
   const finalize = React.useCallback(
-    (role: string): Promise<TranscriptionOutcome | null> =>
+    (): Promise<TranscriptionOutcome | null> =>
       enqueue(async () => {
         const win = windowRef.current;
         if (!win) return null;
@@ -253,7 +253,6 @@ export function useUtteranceRecorder(): UtteranceRecorder {
         const extension = win.mimeType.includes("mp4") ? "mp4" : "webm";
         return postUtterance({
           audio: blob,
-          role,
           durationMs,
           filename: `utterance.${extension}`,
           signal: controller.signal,

@@ -72,21 +72,6 @@ export function parseRole(raw: unknown): VitalRole | null {
   return raw === "doctor" || raw === "staff" ? raw : null;
 }
 
-export function parseRoleFromRequest(
-  req: Request,
-  bodyRole?: unknown
-): VitalRole | null {
-  const headerRole = req.headers.get("x-vital-role");
-  const fromHeader = parseRole(headerRole);
-  if (fromHeader) return fromHeader;
-  return parseRole(bodyRole);
-}
-
-export function roleRequestHeaders(role: VitalRole | null): HeadersInit {
-  if (!role) return {};
-  return { "x-vital-role": role };
-}
-
 export function isRestrictedClinicalPatch(patch: unknown): boolean {
   if (!patch || typeof patch !== "object") return false;
   const keys = Object.keys(patch as Record<string, unknown>);

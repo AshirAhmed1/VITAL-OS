@@ -78,6 +78,11 @@ function isMissingColumnError(error: {
 function stripOptionalPatientColumns(
   rowPatch: Partial<PatientRow>
 ): Partial<PatientRow> {
+  // clinician_id and hospital_id are deliberately NOT stripped. They are M2
+  // schema, guaranteed present by 0005_patients_tenancy.sql, and dropping
+  // clinician_id on a retry would silently create an unattributed patient --
+  // exactly the failure the chart_notes retry produced before
+  // add_patient_voice_fields.sql was applied.
   const { chart_notes, discharged_at, discharge_reason, discharged_by, ...rest } =
     rowPatch;
   return rest;
@@ -180,7 +185,16 @@ export async function getPatientByMrn(mrn: string): Promise<DemoPatient | undefi
 }
 
 export async function createPatientFromPayload(
-  body: unknown
+  body: unknown,
+  /**
+   * Admitting clinician's uuid (auth.users.id, which is also clinicians.id).
+   *
+   * Comes from getCallerClinician() in the route, never from the request body:
+   * a client-supplied attribution is not an attribution. Optional so the
+   * signature stays compatible with callers that have no caller context --
+   * seedDemoPatientsIfEmpty() admits nobody.
+   */
+  clinicianId?: string
 ): Promise<{ patient: DemoPatient; event: PatientStoreEvent }> {
   const o = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
   const name = String(o.name ?? "").trim();
@@ -191,7 +205,15 @@ export async function createPatientFromPayload(
   const id = newPatientId(name);
   const mrn = String(o.mrn ?? "").trim() || newMrn();
   const patient = payloadToDemoPatient(o, id, mrn);
-  const row = demoPatientToRow(patient);
+  const row = {
+    ...demoPatientToRow(patient),
+    // hospital_id is deliberately absent: it takes the column default from
+    // 0005_patients_tenancy.sql. Setting it here from caller.hospitalId would
+    // look more correct and be less safe -- it would put a client-influenced
+    // value where a fixed default currently sits, and M3's RLS WITH CHECK is
+    // the right place to bind tenancy to the caller.
+    ...(clinicianId ? { clinician_id: clinicianId } : {}),
+  };
 
   console.log("[PATIENT CREATE] Parsed payload / insert row:", {
     id: row.id,
@@ -212,6 +234,7 @@ export async function createPatientFromPayload(
     emergency_contact: row.emergency_contact,
     chart_notes: row.chart_notes,
     discharged_at: row.discharged_at,
+    clinician_id: row.clinician_id ?? null,
   });
 
   const supabase = createServerSupabase();
