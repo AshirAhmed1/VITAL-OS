@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import {
   API_AI_RESTRICTED_MESSAGE,
   parseRole,
-  parseRoleFromRequest,
   type VitalRole,
 } from "@/lib/auth";
+import { getCallerClinician } from "@/lib/auth-server";
 import { listPatients } from "@/lib/patient-store";
 import {
   GEMINI_MODEL,
@@ -77,7 +77,10 @@ export async function POST(req: Request) {
       ? body.activePatientId.trim()
       : null;
 
-  const role = parseRoleFromRequest(req, body.role);
+  // body.role is no longer consulted. It was a fallback for clients that could
+  // not set headers; both it and the header are now caller-asserted input.
+  const caller = await getCallerClinician();
+  const role = caller?.role ?? null;
   if (role !== "doctor") {
     return NextResponse.json(
       { error: API_AI_RESTRICTED_MESSAGE },

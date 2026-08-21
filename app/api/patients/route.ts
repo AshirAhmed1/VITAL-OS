@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  DOCTOR_ONLY_API_MESSAGE,
-  parseRoleFromRequest,
-} from "@/lib/auth";
+import { DOCTOR_ONLY_API_MESSAGE } from "@/lib/auth";
+import { requireDoctor } from "@/lib/auth-server";
 import {
   createPatientFromPayload,
   listDischargedPatients,
@@ -45,8 +43,8 @@ export async function POST(req: Request) {
       lastVisit: body.lastVisit,
       keys: Object.keys(body),
     });
-    const role = parseRoleFromRequest(req, body.role);
-    if (role !== "doctor") {
+    const caller = await requireDoctor();
+    if (!caller) {
       return NextResponse.json(
         { error: DOCTOR_ONLY_API_MESSAGE },
         { status: 403 }
