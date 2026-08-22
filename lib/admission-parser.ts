@@ -85,6 +85,20 @@ const MEDICATION_ALIASES: Record<string, string> = {
   acetaminophen: "Acetaminophen",
 };
 
+const SEX_ALIASES: Record<string, string> = {
+  mail: "male",
+  femail: "female",
+  femal: "female",
+  fem: "female",
+  mal: "male",
+  mel: "male",
+  meal: "male",
+  "m ale": "male",
+  "f emale": "female",
+  gentleman: "male",
+  lady: "female",
+};
+
 const ALLERGY_EXPLICIT_RE =
   /\b(?:allergic to|allergy to|has allergy(?: to)?|allergies are|no known allergies|nkda|nka)\b/i;
 
@@ -266,6 +280,20 @@ function extractAgeSex(text: string): { age?: number; sex?: string } {
       const sex = normalizeSexToken(sexOnly[1]);
       if (sex) out.sex = sex;
     }
+    // ASR mishear fallback: check common speech-to-text mistakes
+    if (!out.sex) {
+      const words = text.toLowerCase().split(/\s+/);
+      for (const word of words) {
+        const canonical = SEX_ALIASES[word];
+        if (canonical) {
+          const sex = normalizeSexToken(canonical);
+          if (sex) {
+            out.sex = sex;
+            break;
+          }
+        }
+      }
+    }
   }
   return out;
 }
@@ -311,7 +339,7 @@ function extractChiefConcern(text: string, hasMedication: boolean): string | und
   const patterns = [
     /\bchief concern(?: is)?\s+(.+?)(?=$|\b(?:room|in room|to room|age|years?\s+old|male|female|medication|med|give|prescribe|needs|acuity|ctas|priority|urgency|and give|and needs)\b)/i,
     /\bconcern is\s+(.+?)(?=$|\b(?:room|in room|to room|age|years?\s+old|male|female|medication|med|give|prescribe|needs|acuity|ctas|priority|urgency|and give|and needs)\b)/i,
-    /\b(?:complaining of|presenting with|due to|came in for)\s+(.+?)(?=$|\b(?:room|in room|to room|age|years?\s+old|male|female|medication|med|give|prescribe|needs|acuity|ctas|priority|urgency|and give|and needs)\b)/i,
+    /\b(?:complaining of|presenting with|due to|came in for)\s+(.+?)(?=$|\b(?:room|in room|to room|age|years?\s+old|male|female|medication|med|give|prescribe|needs|acuity|ctas|priority|urgency|and give|and needs)\b)/i,  
     /\b(?:with|for)\s+(.+?)(?=$|\b(?:room|in room|to room|age|years?\s+old|male|female|medication|med|give|prescribe|needs|acuity|ctas|priority|urgency|and give|and needs)\b)/i,
     /\b(?:he|she|they)\s+have\s+(.+?)(?=$|\b(?:room|in room|to room|age|years?\s+old|male|female|medication|med|give|prescribe|needs|acuity|ctas|priority|urgency|and give|and needs)\b)/i,
     /\bhas\s+(.+?)(?=$|\b(?:room|in room|to room|age|years?\s+old|male|female|medication|med|give|prescribe|needs|acuity|ctas|priority|urgency|and give|and needs)\b)/i,
@@ -331,19 +359,16 @@ function extractChiefConcern(text: string, hasMedication: boolean): string | und
     }
   }
   if (hasMedication) return undefined;
+  // Bare-answer fallback: accept any short answer as chief concern.
+  // The caller already knows it asked "what's the chief concern."
+  const bare = text.split(CONCERN_STOP_RE)[0]?.trim();
   if (
-    /\b(?:pain|fever|nausea|injury|bleeding|shortness|breath|chest|abdominal|seizure|trauma|migraine|dizziness|vomiting|aura)\b/i.test(
-      text
-    )
+    bare &&
+    !isInvalidAdmissionName(bare) &&
+    !/\b(?:needs?|aspirin|aspers)\b/i.test(bare) &&
+    bare.split(/\s+/).length <= 6
   ) {
-    const maybe = text.split(CONCERN_STOP_RE)[0]?.trim();
-    if (
-      maybe &&
-      !isInvalidAdmissionName(maybe) &&
-      !/\b(?:needs?|aspirin|aspers)\b/i.test(maybe)
-    ) {
-      return maybe;
-    }
+    return bare;
   }
   return undefined;
 }
