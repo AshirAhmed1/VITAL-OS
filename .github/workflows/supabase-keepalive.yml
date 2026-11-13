@@ -1,0 +1,28 @@
+
+name: VITAL-OS Supabase Keep Alive
+
+on:
+  schedule:
+    - cron: "17 0,8,16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ping Supabase Database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          curl --fail --silent --show-error \
+            --retry 2 \
+            --max-time 30 \
+            "${SUPABASE_URL%/}/rest/v1/keepalive?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_KEY}"
+
+          echo "Supabase keep-alive request succeeded!"
